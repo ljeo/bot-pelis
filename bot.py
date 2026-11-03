@@ -1,7 +1,11 @@
 import os
 import sqlite3
+import logging
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+
+# Configurar logs para ver el estado de forma limpia
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 Token = os.getenv("TELEGRAM_TOKEN")
 
@@ -34,12 +38,19 @@ async def buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ La película no está guardada en la base de datos.")
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logging.error(msg="Exception while handling an update:", exc_info=context.error)
+
 def main():
     app = Application.builder().token(Token).build()
+    
     app.add_handler(MessageHandler(filters.VIDEO | filters.Document.ALL, guardar))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buscar))
+    
+    # Registrar el manejador de errores para evitar alertas en consola
+    app.add_error_handler(error_handler)
 
-    # Usamos polling clásico para evitar bloqueos de puertos y errores en Render
+    # Ejecutar mediante polling estable
     app.run_polling()
 
 if __name__ == "__main__":
