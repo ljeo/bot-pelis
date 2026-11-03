@@ -92,29 +92,24 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="Excepción capturada al procesar una actualización:", exc_info=context.error)
 
 def main():
-    # Reemplaza 'TU_TOKEN_AQUI' con el token que te dio BotFather (o usa una variable de entorno)
+    # Intenta leer el token de las variables de entorno de Render
     TOKEN = os.getenv("TELEGRAM_TOKEN", "TU_TOKEN_AQUI")
     
     if TOKEN == "TU_TOKEN_AQUI":
         logger.warning("⚠️ ¡Atención! No has configurado tu token de Telegram correctamente.")
 
-    application = ApplicationBuilder().token(TOKEN).build()
+    # Configuración de la aplicación con timeouts extendidos para evitar TimedOut en Render
+    application = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .connect_timeout(30.0)
+        .read_timeout(30.0)
+        .write_timeout(30.0)
+        .pool_timeout(30.0)
+        .build()
+    )
 
     # Registro de comandos y manejadores
     application.add_handler(CommandHandler("start", start))
-    
-    # Guarda cuando envías un video o documento con texto en la descripción
     application.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, guardar_pelicula))
-    
-    # Busca cuando escribes texto normal en el chat
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buscar_pelicula))
-
-    # Registrar el manejador de errores
-    application.add_error_handler(error_handler)
-
-    # Iniciar el bot mediante polling
-    logger.info("🤖 Bot iniciado correctamente y escuchando...")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+    application.
