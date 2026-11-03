@@ -112,4 +112,14 @@ def main():
     # Registro de comandos y manejadores
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, guardar_pelicula))
-    application.
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buscar_pelicula))
+
+    # Registrar el manejador de errores
+    application.add_error_handler(error_handler)
+
+    # Iniciar el bot mediante polling ignorando actualizaciones viejas atascadas
+    logger.info("🤖 Bot iniciado correctamente y escuchando...")
+    application.run_polling(drop_pending_updates=True)
+
+if __name__ == '__main__':
+    main()
