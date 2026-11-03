@@ -1,6 +1,8 @@
 import logging
 import sqlite3
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
@@ -10,6 +12,24 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# --- MINI SERVIDOR WEB PARA SATISFACER A RENDER (WEB SERVICE) ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive and running!")
+        
+    def log_message(self, format, *args):
+        # Silenciar los logs del servidor web para que no ensucien la consola
+        return
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    logger.info(f"🌐 Servidor web web-dummy iniciado en el puerto {port}")
+    server.serve_forever()
+# ------------------------------------------------------------------
 
 # Configuración y conexión a la base de datos SQLite
 DB_NAME = "peliculas.db"
@@ -26,26 +46,19 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Inicializar la base de datos al arrancar
 init_db()
 
-# 1. Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "¡Hola! Envíame un video con el nombre de la película en la descripción (caption) para guardarlo, o escríbelo luego para buscarlo."
     )
 
-# 2. Guardar película (Solo extrae el file_id, CERO descargas)
 async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = update.message
-    
-    # Verificamos si el mensaje contiene un video o un documento de video
     video = mensaje.video or mensaje.document
     
     if video:
         file_id = video.file_id
-        
-        # El nombre se toma de la descripción (caption). Si no tiene, usa un genérico
         nombre = mensaje.caption if mensaje.caption else "sin_nombre"
         nombre = nombre.lower().strip()
         
@@ -61,11 +74,9 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error al guardar en la base de datos: {e}")
             await mensaje.reply_text("❌ Hubo un error al guardar la película en la base de datos.")
 
-# 3. Buscar y enviar película por su nombre
 async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_usuario = update.message.text.lower().strip()
     
-    # Ignorar si es un comando (empieza con /)
     if texto_usuario.startswith('/'):
         return
 
@@ -78,7 +89,6 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if resultado:
             file_id = resultado[0]
-            # Telegram reenvía el archivo usando su propia nube, sin gastar la memoria de Render
             await update.message.reply_video(video=file_id)
         else:
             await update.message.reply_text("❌ No encontré ninguna película con ese nombre.")
@@ -87,18 +97,18 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error al buscar en la base de datos: {e}")
         await update.message.reply_text("❌ Ocurrió un error al buscar la película.")
 
-# Manejador global de errores para evitar que el bot muera en silencio
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="Excepción capturada al procesar una actualización:", exc_info=context.error)
 
 def main():
-    # Intenta leer el token de las variables de entorno de Render
+    # 1. Iniciar el servidor web falso en un hilo secundario (para que Render detecte el puerto)
+    threading.Thread(target=run_web_server, daemon=True).start()
+
     TOKEN = os.getenv("TELEGRAM_TOKEN", "TU_TOKEN_AQUI")
     
     if TOKEN == "TU_TOKEN_AQUI":
         logger.warning("⚠️ ¡Atención! No has configurado tu token de Telegram correctamente.")
 
-    # Configuración de la aplicación con timeouts extendidos para evitar TimedOut en Render
     application = (
         ApplicationBuilder()
         .token(TOKEN)
@@ -109,15 +119,11 @@ def main():
         .build()
     )
 
-    # Registro de comandos y manejadores
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, guardar_pelicula))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buscar_pelicula))
-
-    # Registrar el manejador de errores
     application.add_error_handler(error_handler)
 
-    # Iniciar el bot mediante polling ignorando actualizaciones viejas atascadas
     logger.info("🤖 Bot iniciado correctamente y escuchando...")
     application.run_polling(drop_pending_updates=True)
 
