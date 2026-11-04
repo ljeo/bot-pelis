@@ -1,146 +1,82 @@
-import logging
 import os
-import threading
-import asyncio
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-import libsql_client
+from libsql_client import create_client
 
-# Configurar el sistema de registros (logs)
+# Configurar logs
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# --- MINI SERVIDOR WEB PARA SATISFACER A RENDER (WEB SERVICE) ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is alive and running!")
-        
-    def log_message(self, format, *args):
-        return
+# Obtener credenciales de las variables de entorno de Render
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    logger.info(f"🌐 Servidor web web-dummy iniciado en el puerto {port}")
-    server.serve_forever()
-# ------------------------------------------------------------------
+# Función auxiliar para obtener el cliente de Turso de forma segura
+def get_turso_client():
+    url = TURSO_DATABASE_URL
+    # Corrección automática por si acaso falta el prefijo libsql://
+    if url and url.startswith("https://"):
+        url = url.replace("https://", "libsql://", 1)
+    elif url and not url.startswith("libsql://"):
+        url = f"libsql://{url}"
+    
+    return create_client(url=url, auth_token=TURSO_AUTH_TOKEN)
 
-# Configuración y conexión a Turso (libSQL) con corrección automática de protocolo
-TURSO_URL = os.getenv("TURSO_DATABASE_URL", "")
-if TURSO_URL.startswith("https://"):
-    TURSO_URL = TURSO_URL.replace("https://", "libsql://")
-
-TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "")
-
-def get_db_client():
-    return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
-
-async def init_db():
-    try:
-        client = get_db_client()
-        await client.execute("""
-            CREATE TABLE IF NOT EXISTS peliculas (
-                nombre TEXT PRIMARY KEY,
-                file_id TEXT NOT NULL
-            )
-        """)
-        client.close()
-        logger.info("📦 Base de datos en Turso inicializada correctamente.")
-    except Exception as e:
-        logger.error(f"Error al inicializar la base de datos en Turso: {e}")
-
-try:
-    asyncio.run(init_db())
-except Exception:
-    pass
-
+# Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_name = update.effective_user.first_name
     await update.message.reply_text(
-        "¡Hola! Envíame un video con el nombre de la película en la descripción (caption) para guardarlo en la nube, o escríbelo luego para buscarlo."
+        f"¡Hola {user_name}! 🎬 Envíame el nombre o la información de la película que deseas guardar en tu base de datos de Turso."
     )
 
-async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mensaje = update.message
-    video = mensaje.video or mensaje.document
-    
-    if video:
-        file_id = video.file_id
-        nombre = mensaje.caption if mensaje.caption else "sin_nombre"
-        nombre = nombre.lower().strip()
-        
-        try:
-            client = get_db_client()
-            await client.execute(
-                "INSERT OR REPLACE INTO peliculas (nombre, file_id) VALUES (?, ?)", 
-                [nombre, file_id]
-            )
-            client.close()
-            
-            await mensaje.reply_text(f"✅ ¡Película guardada con éxito en Turso como: '{nombre}'!")
-        except Exception as e:
-            logger.error(f"Error al guardar en la base de datos: {e}")
-            await mensaje.reply_text("❌ Hubo un error al guardar la película en la base de datos.")
-
-async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto_usuario = update.message.text.lower().strip()
-    
-    if texto_usuario.startswith('/'):
-        return
+# Manejador de mensajes para guardar o interactuar con la BD
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto_mensaje = update.message.text
+    chat_id = update.effective_chat.id
 
     try:
-        client = get_db_client()
-        busqueda = f"%{texto_usuario}%"
-        result = await client.execute(
-            "SELECT nombre, file_id FROM peliculas WHERE LOWER(nombre) LIKE ?", 
-            [busqueda]
-        )
-        client.close()
-        
-        if result.rows:
-            file_id = result.rows[0][1]
-            await update.message.reply_video(video=file_id)
-        else:
-            await update.message.reply_text("❌ No encontré ninguna película con ese nombre.")
-            
-    except Exception as e:
-        logger.error(f"Error al buscar en la base de datos: {e}")
-        # Corregido: usamos update.message en lugar de 'mensaje' para evitar NameError
-        await update.message.reply_text("❌ Ocurrió un error al buscar la película.")
+        # Usando el contexto asíncrono recomendado para evitar sesiones abiertas
+        async with get_turso_client() as client:
+            # Ejemplo: Crear tabla si no existe (puedes adaptarlo a tu esquema)
+            await client.execute("""
+                CREATE TABLE IF NOT EXISTS peliculas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id TEXT,
+                    titulo TEXT
+                )
+            """)
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(msg="Excepción capturada al procesar una actualización:", exc_info=context.error)
+            # Ejemplo: Guardar datos en la base de datos
+            await client.execute(
+                "INSERT INTO peliculas (chat_id, titulo) VALUES (?, ?)",
+                [str(chat_id), texto_mensaje]
+            )
+
+        await update.message.reply_text("✅ ¡Película guardada exitosamente en Turso!")
+
+    except Exception as e:
+        logger.error(f"Error al guardar en la base de datos: {e}")
+        await update.message.reply_text(f"❌ Ocurrió un error al guardar en la base de datos.")
 
 def main():
-    threading.Thread(target=run_web_server, daemon=True).start()
+    if not TELEGRAM_TOKEN:
+        logger.error("No se encontró el TELEGRAM_TOKEN en las variables de entorno.")
+        return
 
-    TOKEN = os.getenv("TELEGRAM_TOKEN", "TU_TOKEN_AQUI")
-    
-    if TOKEN == "TU_TOKEN_AQUI":
-        logger.warning("⚠️ ¡Atención! No has configurado tu token de Telegram correctamente.")
+    # Construir la aplicación del bot
+    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    application = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .connect_timeout(30.0)
-        .read_timeout(30.0)
-        .write_timeout(30.0)
-        .pool_timeout(30.0)
-        .build()
-    )
-
+    # Registrar manejadores
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, guardar_pelicula))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buscar_pelicula))
-    application.add_error_handler(error_handler)
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    logger.info("🤖 Bot iniciado correctamente y escuchando...")
-    application.run_polling(drop_pending_updates=True)
+    # Iniciar el bot
+    logger.info("Iniciando el bot...")
+    application.run_polling()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
