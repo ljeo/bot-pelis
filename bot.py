@@ -213,13 +213,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lang = await obtener_idioma_usuario(user_id)
         
         try:
-            # Buscar texto personalizado si existe
             sql_txt = "SELECT valor FROM config WHERE clave = 'bienvenida_texto'"
             res_txt = await ejecutar_turso_sql([sql_txt])
             rows_txt = res_txt.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             texto_final = rows_txt[0][0].get("value") if rows_txt and "value" in rows_txt[0][0] else TEXTOS[lang]["start"]
 
-            # Buscar imagen personalizada si existe
             sql_img = "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
             res_img = await ejecutar_turso_sql([sql_img])
             rows_img = res_img.get("results", [])[0]["response"].get("result", {}).get("rows", [])
@@ -348,7 +346,7 @@ async def eliminar_texto_bienvenida(update: Update, context: ContextTypes.DEFAUL
     try:
         sql = "DELETE FROM config WHERE clave = 'bienvenida_texto'"
         await ejecutar_turso_sql([sql])
-        await update.message.reply_text("✅ ¡Texto de bienvenida personalizado eliminado! Volvió al texto por defecto.")
+        await update.message.reply_text("✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
     except Exception as e:
         logger.error(f"Error eliminando texto: {e}")
         await update.message.reply_text("❌ Error al eliminar el texto.")
@@ -438,4 +436,37 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
     if not data.startswith("temp_"):
         return
 
-    temporada = data.replace("temp
+    temporada = data.replace("temp_", "")
+    file_id = context.user_data.get("pending_file_id")
+    titulo_base = context.user_data.get("pending_titulo")
+    chat_id = str(query.message.chat_id)
+    user_id = query.from_user.id
+    lang = await obtener_idioma_usuario(user_id)
+
+    if not file_id or not titulo_base:
+        await query.edit_message_text("❌ Session expired. Try /guardar again.")
+        return
+
+    try:
+        if temporada == "General":
+            titulo_final = titulo_base
+            temp_guardar = "General"
+        else:
+            num_temp = temporada.replace("Temporada ", "").strip()
+            titulo_escaped = titulo_base.replace("'", "''")
+            temp_escaped = temporada.replace("'", "''")
+            sql_count = f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '{titulo_escaped.lower()}%' AND temporada = '{temp_escaped}'"
+            res_count = await ejecutar_turso_sql([sql_count])
+            
+            count = 0
+            try:
+                results_list = res_count.get("results", [])
+                if results_list and "response" in results_list[0]:
+                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
+                    if rows and "value" in rows[0][0]:
+                        count = int(rows[0][0]["value"])
+            except Exception:
+                count = 0
+
+            siguiente_cap = count + 1
+            titulo_final = f"{
