@@ -46,7 +46,7 @@ TEXTOS = {
         "falta_video": "⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.",
         "falta_nombre": "⚠️ Debes indicar un nombre. Ejemplo: `/guardar Naruto`",
         "guardando": "📺 Guardando: *{titulo}*\n¿A qué temporada pertenece este capítulo o es película única?",
-        "exito_guardار": "✅ ¡Guardado exitosamente!\n📁 *{titulo}*",
+        "exito_guardar": "✅ ¡Guardado exitosamente!\n📁 *{titulo}*",
         "buscando": "🔍 Encontré '{query}'. Selecciona lo que deseas ver:",
         "no_encontrado": "🔍 No encontré nada relacionado o disponible con '{query}'.",
         "donde_enviar": "📍 ¿Dónde prefieres recibir: *{titulo}*?",
@@ -74,6 +74,19 @@ def start_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
     server.serve_forever()
+
+async def editar_o_enviar(query, text, reply_markup=None, parse_mode=None):
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception:
+        try:
+            await query.edit_message_caption(caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception:
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            await query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 def get_turso_rest_url() -> str:
     url = TURSO_DATABASE_URL.strip()
@@ -156,7 +169,7 @@ async def es_admin(user_id: int) -> bool:
     try:
         sql = f"SELECT user_id FROM admins WHERE user_id = '{user_id}'"
         resultado = await ejecutar_turso_sql([sql])
-        results_list = resultado.get("titles", []) or resultado.get("results", [])
+        results_list = resultado.get("results", [])
         if results_list and "response" in results_list[0]:
             rows = results_list[0]["response"].get("result", {}).get("rows", [])
             if rows:
@@ -223,16 +236,16 @@ async def mostrar_catalogo_registrado(update: Update, context: ContextTypes.DEFA
     await query.answer()
     
     try:
-        # Consulta simplificada sin DISTINCT para evitar bloqueos de formato
-        sql = "SELECT temporada, titulo FROM peliculas LIMIT 15"
+        sql = "SELECT temporada, titulo FROM peliculas LIMIT 20"
         resultado = await ejecutar_turso_sql([sql])
+        
         rows = []
         try:
             results_list = resultado.get("results", [])
             if results_list and "response" in results_list[0]:
                 rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            rows = []
+        except Exception as e:
+            logger.error(f"Error parseando JSON de Turso en catálogo: {e}")
 
         keyboard = []
         titulos_vistos = set()
@@ -240,8 +253,13 @@ async def mostrar_catalogo_registrado(update: Update, context: ContextTypes.DEFA
         if rows:
             for row in rows:
                 try:
-                    temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] and row[0]["value"] is not None else "General"
-                    titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] and row[1]["value"] is not None else ""
+                    temporada = "General"
+                    if len(row) > 0 and isinstance(row[0], dict) and row[0].get("value") is not None:
+                        temporada = str(row[0]["value"])
+                    
+                    titulo_encontrado = ""
+                    if len(row) > 1 and isinstance(row[1], dict) and row[1].get("value") is not None:
+                        titulo_encontrado = str(row[1]["value"])
                     
                     if not titulo_encontrado or titulo_encontrado in titulos_vistos:
                         continue
@@ -252,8 +270,9 @@ async def mostrar_catalogo_registrado(update: Update, context: ContextTypes.DEFA
                         button_text = f"🎬 {titulo_encontrado}"
                         callback_data = f"seltemp_{titulo_encontrado}_General"
                     else:
-                        button_text = f"📺 {titulo_encontrado} ({temporada})"
-                        callback_data = f"seltemp_{titulo_encontrado}_{temporada}"
+                        nombre_base = titulo_encontrado.split(" (")[0] if " (" in titulo_encontrado else titulo_encontrado
+                        button_text = f"📺 {nombre_base} ({temporada})"
+                        callback_data = f"seltemp_{nombre_base}_{temporada}"
                     
                     if len(callback_data.encode('utf-8')) > 64:
                         callback_data = callback_data[:63]
@@ -261,29 +280,29 @@ async def mostrar_catalogo_registrado(update: Update, context: ContextTypes.DEFA
                     btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
                     if btn_tuple not in keyboard:
                         keyboard.append(btn_tuple)
-                except Exception:
-                    continue
+                except Exception as row_ex:
+                    logger.error(f"Error procesando fila del catálogo: {row_ex}")
 
         keyboard.append([InlineKeyboardButton("🔙 Volver al Inicio", callback_data="catalogo_volver_inicio")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         if len(keyboard) > 1:
-            await query.edit_message_text("📂 **Catálogo de Contenido Registrado:**\n\nSelecciona el título que deseas ver o recibir:", reply_markup=reply_markup, parse_mode="Markdown")
+            await editar_o_enviar(query, "📂 **Catálogo de Contenido Registrado:**\n\nSelecciona el título que deseas ver o recibir:", reply_markup=reply_markup, parse_mode="Markdown")
         else:
-            await query.edit_message_text("⚠️ Aún no hay películas, series o animes registrados en la base de datos.", reply_markup=reply_markup)
+            await editar_o_enviar(query, "⚠️ Aún no hay películas, series o animes registrados en la base de datos.", reply_markup=reply_markup)
             
     except Exception as e:
-        logger.error(f"Error cargando catálogo: {e}")
+        logger.error(f"Error crítico cargando catálogo: {e}", exc_info=True)
         keyboard = [[InlineKeyboardButton("🔙 Volver al Inicio", callback_data="catalogo_volver_inicio")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("⚠️ Ocurrió un error al cargar el catálogo. Intenta usar /buscar [nombre].", reply_markup=reply_markup)
+        await editar_o_enviar(query, "⚠️ Ocurrió un error al cargar el catálogo. Intenta usar /buscar [nombre].", reply_markup=reply_markup)
 
 async def catalogo_volver_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     keyboard = [[InlineKeyboardButton("📂 Ver Catálogo Registrado", callback_data="catalogo_ver_todo")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text("🎬 **Menú Principal del Bot**\n\nPuedes explorar el catálogo con el botón de abajo o buscar directamente usando `/buscar [nombre]`.", reply_markup=reply_markup, parse_mode="Markdown")
+    await editar_o_enviar(query, "🎬 **Menú Principal del Bot**\n\nPuedes explorar el catálogo con el botón de abajo o buscar directamente usando `/buscar [nombre]`.", reply_markup=reply_markup, parse_mode="Markdown")
 
 async def menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
@@ -311,27 +330,27 @@ async def callback_menu_bienvenida(update: Update, context: ContextTypes.DEFAULT
         context.user_data["esperando_foto_bienvenida"] = True
         context.user_data.pop("esperando_texto_bienvenida", None)
         keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
-        await query.edit_message_text("🖼️ Envía la **imagen** que deseas usar para la bienvenida.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await editar_o_enviar(query, "🖼️ Envía la **imagen** que deseas usar para la bienvenida.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "cfg_set_texto":
         context.user_data["esperando_texto_bienvenida"] = True
         context.user_data.pop("esperando_foto_bienvenida", None)
         keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
-        await query.edit_message_text("📝 Envía el **texto** largo de bienvenida con tus saltos de línea normales.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await editar_o_enviar(query, "📝 Envía el **texto** largo de bienvenida con tus saltos de línea normales.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     elif data == "cfg_del_foto":
         try:
             await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_img'"])
-            await query.edit_message_text("✅ ¡Imagen de bienvenida eliminada con éxito!")
+            await editar_o_enviar(query, "✅ ¡Imagen de bienvenida eliminada con éxito!")
         except Exception:
-            await query.edit_message_text("❌ Error al eliminar la imagen.")
+            await editar_o_enviar(query, "❌ Error al eliminar la imagen.")
 
     elif data == "cfg_del_texto":
         try:
             await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_texto'"])
-            await query.edit_message_text("✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
+            await editar_o_enviar(query, "✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
         except Exception:
-            await query.edit_message_text("❌ Error al eliminar el texto.")
+            await editar_o_enviar(query, "❌ Error al eliminar el texto.")
 
     elif data == "cfg_volver":
         context.user_data.pop("esperando_foto_bienvenida", None)
@@ -342,7 +361,7 @@ async def callback_menu_bienvenida(update: Update, context: ContextTypes.DEFAULT
             [InlineKeyboardButton("🗑️ Eliminar Imagen", callback_data="cfg_del_foto"),
              InlineKeyboardButton("🗑️ Eliminar Texto", callback_data="cfg_del_texto")]
         ]
-        await query.edit_message_text("🎛️ **Panel de Configuración de Bienvenida**\n\nSelecciona qué deseas configurar:", reply_markup=reply_markup, parse_mode="Markdown")
+        await editar_o_enviar(query, "🎛️ **Panel de Configuración de Bienvenida**\n\nSelecciona qué deseas configurar:", reply_markup=reply_markup, parse_mode="Markdown")
 
 async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
@@ -405,4 +424,35 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         sql_check_file = f"SELECT titulo FROM peliculas WHERE file_id = '{file_id_subido}'"
         res_file = await ejecutar_turso_sql([sql_check_file])
-        rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows",
+        rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if rows_file:
+            nombre_existente = rows_file[0][0].get("value", "este contenido")
+            await update.message.reply_text(f"⚠️ **Este archivo ya se encuentra registrado** con el nombre: *{nombre_existente}*.", parse_mode="Markdown")
+            return
+    except Exception:
+        pass
+
+    context.user_data["pending_file_id"] = file_id_subido
+    context.user_data["pending_titulo"] = texto_args
+
+    keyboard = [
+        [
+            InlineKeyboardButton("Temporada 1", callback_data="temp_Temporada 1"),
+            InlineKeyboardButton("Temporada 2", callback_data="temp_Temporada 2"),
+        ],
+        [
+            InlineKeyboardButton("Temporada 3", callback_data="temp_Temporada 3"),
+            InlineKeyboardButton("Temporada 4", callback_data="temp_Temporada 4"),
+        ],
+        [
+            InlineKeyboardButton("🎬 Película / Única", callback_data="temp_General"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        f"📺 Guardando: *{texto_args}*\n¿A qué temporada pertenece este capítulo o es película única?",
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
