@@ -38,10 +38,10 @@ TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 def get_db_client():
     return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
 
-def init_db():
+async def init_db():
     try:
         client = get_db_client()
-        client.execute("""
+        await client.execute("""
             CREATE TABLE IF NOT EXISTS peliculas (
                 nombre TEXT PRIMARY KEY,
                 file_id TEXT NOT NULL
@@ -52,7 +52,12 @@ def init_db():
     except Exception as e:
         logger.error(f"Error al inicializar la base de datos en Turso: {e}")
 
-init_db()
+# Ejecutamos la inicialización asíncrona de la base de datos al arrancar
+import asyncio
+try:
+    asyncio.run(init_db())
+except Exception:
+    pass
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -70,7 +75,7 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         try:
             client = get_db_client()
-            client.execute(
+            await client.execute(
                 "INSERT OR REPLACE INTO peliculas (nombre, file_id) VALUES (?, ?)", 
                 [nombre, file_id]
             )
@@ -89,15 +94,16 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         client = get_db_client()
-        result = client.execute(
-            "SELECT file_id FROM peliculas WHERE nombre = ?", 
-            [texto_usuario]
+        busqueda = f"%{texto_usuario}%"
+        # ¡AQUÍ ESTABA EL DETALLE! Agregamos 'await' para que espere el resultado de Turso
+        result = await client.execute(
+            "SELECT nombre, file_id FROM peliculas WHERE LOWER(nombre) LIKE ?", 
+            [busqueda]
         )
         client.close()
         
-        # libsql_client devuelve filas en .rows
         if result.rows:
-            file_id = result.rows[0][0]
+            file_id = result.rows[0][1]
             await update.message.reply_video(video=file_id)
         else:
             await update.message.reply_text("❌ No encontré ninguna película con ese nombre.")
