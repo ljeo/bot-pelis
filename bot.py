@@ -11,18 +11,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Carga y validación estricta de variables de entorno
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 
-if not TELEGRAM_TOKEN:
-    logger.critical("La variable de entorno TELEGRAM_TOKEN no está configurada.")
-    raise ValueError("TELEGRAM_TOKEN es obligatorio.")
-
-if not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
-    logger.critical("Las credenciales de Turso (URL o Token) no están configuradas correctamente.")
-    raise ValueError("Las credenciales de Turso son obligatorias.")
+if not TELEGRAM_TOKEN or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
+    logger.critical("Faltan variables de entorno obligatorias.")
+    raise ValueError("Configura TELEGRAM_TOKEN, TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.")
 
 def get_turso_rest_url() -> str:
     url = TURSO_DATABASE_URL.strip()
@@ -72,9 +67,9 @@ async def init_db() -> None:
             )
         """
         await ejecutar_turso_sql([sql])
-        logger.info("Base de datos y tabla 'peliculas' verificadas correctamente vía HTTP REST.")
+        logger.info("Base de datos y tabla 'peliculas' verificadas correctamente.")
     except Exception as e:
-        logger.critical(f"Error al inicializar la base de datos vía HTTP REST: {e}")
+        logger.critical(f"Error al inicializar la base de datos: {e}")
         raise
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -83,40 +78,77 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     user_name = update.effective_user.first_name
     await update.message.reply_text(
-        f"¡Hola {user_name}! 🎬 Envíame el nombre de la película que deseas guardar."
+        f"¡Hola {user_name}! 🎬\n\n"
+        "• Usa **/guardar [nombre]** para registrar una película.\n"
+        "• Escribe el nombre de una película directamente para buscarla en tu lista."
     )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Guarda una película usando el comando /guardar Nombre"""
     if not update.message or not update.message.text:
         return
 
-    texto_mensaje = update.message.text.strip()
+    texto_args = " ".join(context.args).strip()
+    if not texto_args:
+        await update.message.reply_text("⚠️ Por favor indica el nombre de la película. Ejemplo: `/guardar Matrix`")
+        return
+
     chat_id = str(update.effective_chat.id)
 
     try:
-        titulo_escaped = texto_mensaje.replace("'", "''")
+        titulo_escaped = texto_args.replace("'", "''")
         sql = f"INSERT INTO peliculas (chat_id, titulo) VALUES ('{chat_id}', '{titulo_escaped}')"
-        
         await ejecutar_turso_sql([sql])
 
-        await update.message.reply_text("✅ ¡Película guardada exitosamente en Turso!")
-        logger.info(f"Película guardada para el chat {chat_id}: {texto_mensaje}")
-
+        await update.message.reply_text(f"✅ ¡Película guardada exitosamente: *{texto_args}*!", parse_mode="Markdown")
     except Exception as e:
-        logger.error(f"Error crítico al insertar en Turso: {e}", exc_info=True)
+        logger.error(f"Error al guardar: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al guardar en la base de datos.")
 
-# NUEVO: Manejador global de errores para capturar cualquier excepción no controlada
+async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Busca la película en Turso cuando escribes su nombre en el chat"""
+    if not update.message or not update.message.text:
+        return
+
+    query_texto = update.message.text.strip()
+    chat_id = str(update.effective_chat.id)
+
+    try:
+        query_escaped = query_texto.replace("'", "''")
+        sql = f"SELECT titulo FROM peliculas WHERE chat_id = '{chat_id}' AND titulo LIKE '%{query_escaped}%'"
+        
+        resultado = await ejecutar_turso_sql([sql])
+        
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                res_data = results_list[0]["response"].get("result", {})
+                rows = res_data.get("rows", [])
+        except Exception:
+            rows = []
+
+        if rows:
+            titulos_encontrados = [row[0]["value"] for row in rows if row and "value" in row[0]]
+            respuesta = "🎥 **Películas encontradas en tu base de datos:**\n\n" + "\n".join([f"• {t}" for t in titulos_encontrados])
+            await update.message.reply_text(respuesta, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"🔍 No encontré ninguna película llamada '{query_texto}' guardada en tu lista.")
+
+    except Exception as e:
+        logger.error(f"Error al buscar en Turso: {e}", exc_info=True)
+        await update.message.reply_text("❌ Ocurrió un error al realizar la búsqueda.")
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Excepción capturada por el manejador global:", exc_info=context.error)
+    logger.error("Excepción capturada:", exc_info=context.error)
 
 def main() -> None:
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    application.add_handler(CommandHandler("guardar", guardar_pelicula))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), buscar_pelicula))
 
-    # Registrar el manejador de errores global
     application.add_error_handler(error_handler)
 
     import asyncio
