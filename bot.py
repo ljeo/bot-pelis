@@ -222,7 +222,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
 
         keyboard = [
-            [InlineKeyboardButton("📂 Ver Catálogo Registrado", callback_data="catalogo_ver_todo")]
+            [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
+             InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -231,78 +232,99 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             await update.message.reply_text(texto_final, parse_mode="Markdown", reply_markup=reply_markup)
 
-async def mostrar_catalogo_registrado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     
     try:
-        sql = "SELECT temporada, titulo FROM peliculas LIMIT 20"
+        # Ordenado por id DESC para que lo último agregado salga primero
+        sql = "SELECT DISTINCT titulo FROM peliculas WHERE temporada = 'General' ORDER BY id DESC LIMIT 20"
         resultado = await ejecutar_turso_sql([sql])
-        
         rows = []
         try:
             results_list = resultado.get("results", [])
             if results_list and "response" in results_list[0]:
                 rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception as e:
-            logger.error(f"Error parseando JSON de Turso en catálogo: {e}")
+        except Exception:
+            pass
 
         keyboard = []
-        titulos_vistos = set()
-        
         if rows:
             for row in rows:
-                try:
-                    temporada = "General"
-                    if len(row) > 0 and isinstance(row[0], dict) and row[0].get("value") is not None:
-                        temporada = str(row[0]["value"])
-                    
-                    titulo_encontrado = ""
-                    if len(row) > 1 and isinstance(row[1], dict) and row[1].get("value") is not None:
-                        titulo_encontrado = str(row[1]["value"])
-                    
-                    if not titulo_encontrado or titulo_encontrado in titulos_vistos:
-                        continue
-                    
-                    titulos_vistos.add(titulo_encontrado)
+                titulo = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
+                if not titulo:
+                    continue
+                callback_data = f"seltemp_{titulo}_General"
+                if len(callback_data.encode('utf-8')) > 64:
+                    callback_data = callback_data[:63]
+                keyboard.append([InlineKeyboardButton(f"🎬 {titulo}", callback_data=callback_data)])
 
-                    if temporada == "General":
-                        button_text = f"🎬 {titulo_encontrado}"
-                        callback_data = f"seltemp_{titulo_encontrado}_General"
-                    else:
-                        nombre_base = titulo_encontrado.split(" (")[0] if " (" in titulo_encontrado else titulo_encontrado
-                        button_text = f"📺 {nombre_base} ({temporada})"
-                        callback_data = f"seltemp_{nombre_base}_{temporada}"
-                    
-                    if len(callback_data.encode('utf-8')) > 64:
-                        callback_data = callback_data[:63]
-                    
-                    btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
-                    if btn_tuple not in keyboard:
-                        keyboard.append(btn_tuple)
-                except Exception as row_ex:
-                    logger.error(f"Error procesando fila del catálogo: {row_ex}")
-
-        keyboard.append([InlineKeyboardButton("🔙 Volver al Inicio", callback_data="catalogo_volver_inicio")])
+        keyboard.append([InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        if len(keyboard) > 1:
-            await editar_o_enviar(query, "📂 **Catálogo de Contenido Registrado:**\n\nSelecciona el título que deseas ver o recibir:", reply_markup=reply_markup, parse_mode="Markdown")
+        if rows:
+            await editar_o_enviar(query, "🎬 **Películas Registradas (Más recientes primero):**\n\nSelecciona la película que deseas ver:", reply_markup=reply_markup, parse_mode="Markdown")
         else:
-            await editar_o_enviar(query, "⚠️ Aún no hay películas, series o animes registrados en la base de datos.", reply_markup=reply_markup)
-            
+            await editar_o_enviar(query, "⚠️ No hay películas registradas todavía.", reply_markup=reply_markup)
     except Exception as e:
-        logger.error(f"Error crítico cargando catálogo: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton("🔙 Volver al Inicio", callback_data="catalogo_volver_inicio")]]
+        logger.error(f"Error cargando películas: {e}")
+        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
+        await editar_o_enviar(query, "❌ Ocurrió un error al cargar las películas.", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        # Ordenado por id DESC para mostrar las series añadidas recientemente arriba
+        sql = "SELECT DISTINCT titulo, temporada FROM peliculas WHERE temporada != 'General' ORDER BY id DESC LIMIT 20"
+        resultado = await ejecutar_turso_sql([sql])
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+        except Exception:
+            pass
+
+        keyboard = []
+        if rows:
+            for row in rows:
+                titulo = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
+                temp = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else "Temporada 1"
+                if not titulo:
+                    continue
+                
+                nombre_base = titulo.split(" (")[0] if " (" in titulo else titulo
+                callback_data = f"seltemp_{nombre_base}_{temp}"
+                if len(callback_data.encode('utf-8')) > 64:
+                    callback_data = callback_data[:63]
+                
+                btn_tuple = [InlineKeyboardButton(f"📺 {nombre_base} ({temp})", callback_data=callback_data)]
+                if btn_tuple not in keyboard:
+                    keyboard.append(btn_tuple)
+
+        keyboard.append([InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await editar_o_enviar(query, "⚠️ Ocurrió un error al cargar el catálogo. Intenta usar /buscar [nombre].", reply_markup=reply_markup)
+        
+        if rows:
+            await editar_o_enviar(query, "📺 **Series y Animes Registrados (Más recientes primero):**\n\nSelecciona la temporada que deseas ver:", reply_markup=reply_markup, parse_mode="Markdown")
+        else:
+            await editar_o_enviar(query, "⚠️ No hay series o animes registrados todavía.", reply_markup=reply_markup)
+    except Exception as e:
+        logger.error(f"Error cargando series: {e}")
+        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
+        await editar_o_enviar(query, "❌ Ocurrió un error al cargar las series.", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def catalogo_volver_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    keyboard = [[InlineKeyboardButton("📂 Ver Catálogo Registrado", callback_data="catalogo_ver_todo")]]
+    keyboard = [
+        [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
+         InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await editar_o_enviar(query, "🎬 **Menú Principal del Bot**\n\nPuedes explorar el catálogo con el botón de abajo o buscar directamente usando `/buscar [nombre]`.", reply_markup=reply_markup, parse_mode="Markdown")
+    await editar_o_enviar(query, "🎬 **Menú Principal del Bot**\n\nSelecciona una categoría o busca directamente usando `/buscar [nombre]`.", reply_markup=reply_markup, parse_mode="Markdown")
 
 async def menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
@@ -818,7 +840,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(callback_menu_bienvenida, pattern="^cfg_"))
     application.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, manejar_captura_config))
 
-    application.add_handler(CallbackQueryHandler(mostrar_catalogo_registrado, pattern="^catalogo_ver_todo$"))
+    application.add_handler(CallbackQueryHandler(mostrar_catalogo_peliculas, pattern="^cat_peliculas$"))
+    application.add_handler(CallbackQueryHandler(mostrar_catalogo_series, pattern="^cat_series$"))
     application.add_handler(CallbackQueryHandler(catalogo_volver_inicio, pattern="^catalogo_volver_inicio$"))
 
     application.add_handler(CallbackQueryHandler(boton_idioma, pattern="^lang_"))
