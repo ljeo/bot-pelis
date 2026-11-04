@@ -58,11 +58,18 @@ async def ejecutar_turso_sql(statements: list) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(url, json=payload, headers=headers)
         if response.status_code != 200:
-            logger.error(f"Turso error response: {response.text}")
+            logger.error(f"Turso HTTP error response: {response.text}")
             raise Exception(f"Turso API error HTTP {response.status_code}: {response.text}")
-        return response.json()
+        
+        data = response.json()
+        # Verificar errores internos en el pipeline de Turso
+        for res in data.get("results", []):
+            if res.get("type") == "error":
+                raise Exception(f"Error SQL en Turso: {res.get('error')}")
+        return data
 
 async def init_db() -> None:
+    # Creamos la tabla limpia con todas las columnas necesarias
     sql = """
         CREATE TABLE IF NOT EXISTS peliculas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +87,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             f"¡Hola {update.effective_user.first_name}! 🎬\n\n"
             "• Para guardar: Responde a un video con **/guardar [nombre]**.\n"
-            "• Para buscar: Escribe el nombre de la película y te enviaré el video."
+            "• Para buscar: Escribe el nombre normal en el chat y te enviaré el video."
         )
 
 async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -90,12 +97,12 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     video_obj = update.message.video or (update.message.reply_to_message and update.message.reply_to_message.video)
     
     if not video_obj:
-        await update.message.reply_text("⚠️ Debes enviar o responder con este comando a un **video**. Ejemplo: responde a un video con `/guardar El Marques`")
+        await update.message.reply_text("⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.")
         return
 
     texto_args = " ".join(context.args).strip()
     if not texto_args:
-        await update.message.reply_text("⚠️ Debes indicar un nombre para la película. Ejemplo: `/guardar El Marques`")
+        await update.message.reply_text("⚠️ Debes indicar un nombre. Ejemplo: `/guardar marquez`")
         return
 
     chat_id = str(update.effective_chat.id)
@@ -107,8 +114,8 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await ejecutar_turso_sql([sql])
         await update.message.reply_text(f"✅ ¡Película y video guardados exitosamente como: *{texto_args}*!", parse_mode="Markdown")
     except Exception as e:
-        logger.error(f"Error al guardar video: {e}", exc_info=True)
-        await update.message.reply_text("❌ Ocurrió un error al guardar en la base de datos.")
+        logger.error(f"Error detallado al guardar video: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Error al guardar en la base de datos: {e}")
 
 async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
@@ -118,8 +125,8 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat_id = str(update.effective_chat.id)
 
     try:
-        query_escaped = query_texto.replace("'", "''")
-        sql = f"SELECT titulo, file_id FROM peliculas WHERE chat_id = '{chat_id}' AND titulo LIKE '%{query_escaped}%'"
+        query_escaped = query_texto.replace("'", "''").lower()
+        sql = f"SELECT titulo, file_id FROM peliculas WHERE chat_id = '{chat_id}' AND LOWER(titulo) LIKE '%{query_escaped}%'"
         resultado = await ejecutar_turso_sql([sql])
         
         rows = []
@@ -135,12 +142,16 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 titulo = str(row[0]["value"]) if (isinstance(row, list) and len(row) > 0 and "value" in row[0]) else "Película"
                 file_id = str(row[1]["value"]) if (isinstance(row, list) and len(row) > 1 and "value" in row[1]) else None
 
-                if file_id and file_id != "None":
-                    await update.message.reply_video(video=file_id, caption=f"🎬 Aquí tienes: {titulo}")
+                if file_id and file_id != "None" and file_id.strip() != "":
+                    try:
+                        await update.message.reply_video(video=file_id, caption=f"🎬 Aquí tienes: {titulo}")
+                    except Exception as video_err:
+                        logger.error(f"Error al enviar video de Telegram: {video_err}")
+                        await update.message.reply_text(f"⚠️ Encontré '{titulo}', pero Telegram rechazó el archivo (file_id inválido). Vuelve a guardarlo.")
                 else:
-                    await update.message.reply_text(f"📁 Encontré el registro *{titulo}*, pero no tiene un archivo de video asociado.", parse_mode="Markdown")
+                    await update.message.reply_text(f"📁 Encontré el registro *{titulo}*, pero no tiene video asociado.", parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"🔍 No encontré ninguna película llamada '{query_texto}' en tu lista.")
+            await update.message.reply_text(f"🔍 No encontré ninguna película llamada '{query_texto}'.")
     except Exception as e:
         logger.error(f"Error al buscar: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al buscar en la base de datos.")
