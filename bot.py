@@ -62,24 +62,35 @@ async def ejecutar_turso_sql(statements: list) -> dict:
             raise Exception(f"Turso API error HTTP {response.status_code}: {response.text}")
         
         data = response.json()
-        # Verificar errores internos en el pipeline de Turso
         for res in data.get("results", []):
             if res.get("type") == "error":
-                raise Exception(f"Error SQL en Turso: {res.get('error')}")
+                err_msg = res.get('error', {})
+                # Si el error es porque la columna ya existe, lo ignoramos de manera segura
+                if "duplicate column name" in str(err_msg).lower():
+                    continue
+                raise Exception(f"Error SQL en Turso: {err_msg}")
         return data
 
 async def init_db() -> None:
-    # Creamos la tabla limpia con todas las columnas necesarias
-    sql = """
+    # 1. Crear tabla base si no existe
+    sql_create = """
         CREATE TABLE IF NOT EXISTS peliculas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id TEXT NOT NULL,
             titulo TEXT NOT NULL,
-            file_id TEXT,
             creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
-    await ejecutar_turso_sql([sql])
+    await ejecutar_turso_sql([sql_create])
+
+    # 2. Asegurar que exista la columna file_id en bases de datos antiguas
+    try:
+        sql_alter = "ALTER TABLE peliculas ADD COLUMN file_id TEXT"
+        await ejecutar_turso_sql([sql_alter])
+        logger.info("Columna file_id añadida exitosamente.")
+    except Exception:
+        logger.info("La columna file_id ya existe en la tabla.")
+
     logger.info("Base de datos y tabla 'peliculas' verificadas correctamente.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -149,7 +160,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                         logger.error(f"Error al enviar video de Telegram: {video_err}")
                         await update.message.reply_text(f"⚠️ Encontré '{titulo}', pero Telegram rechazó el archivo (file_id inválido). Vuelve a guardarlo.")
                 else:
-                    await update.message.reply_text(f"📁 Encontré el registro *{titulo}*, pero no tiene video asociado.", parse_mode="Markdown")
+                    await update.message.reply_text(f"📁 Encontré el registro *{titulo}*, pero no tiene video asociado.", parse_Mode="Markdown")
         else:
             await update.message.reply_text(f"🔍 No encontré ninguna película llamada '{query_texto}'.")
     except Exception as e:
