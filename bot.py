@@ -25,10 +25,7 @@ if not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     raise ValueError("Las credenciales de Turso son obligatorias.")
 
 def get_turso_rest_url() -> str:
-    """
-    Convierte la URL de Turso al formato de API REST HTTP estándar (https://),
-    evitando por completo cualquier intento de conexión por WebSockets (wss:// o libsql://).
-    """
+    """Normaliza la URL de Turso al endpoint del pipeline HTTP REST (v2/pipeline)."""
     url = TURSO_DATABASE_URL.strip()
     if url.startswith("libsql://"):
         url = url.replace("libsql://", "https://", 1)
@@ -37,25 +34,28 @@ def get_turso_rest_url() -> str:
     elif not url.startswith("https://"):
         url = f"https://{url}"
     
-    # Asegurar que termine en /v2/pipeline para la API HTTP de Turso
-    if not url.endswith("/v2/p") and not url.endswith("/v2/pipeline"):
+    if not url.endswith("/v2/pipeline"):
         url = url.rstrip("/") + "/v2/pipeline"
     return url
 
 async def ejecutar_turso_sql(statements: list) -> dict:
-    """
-    Ejecuta consultas SQL directamente contra el API REST HTTP de Turso 
-    de forma asíncrona y segura mediante httpx.
-    """
+    """Ejecuta consultas SQL usando el formato de pipeline v2 oficial de Turso."""
     url = get_turso_rest_url()
     headers = {
         "Authorization": f"Bearer {TURSO_AUTH_TOKEN}",
         "Content-Type": "application/json"
     }
     
-    # Formato de payload requerido por el API REST de Turso (libSQL/Sqld)
+    # Estructura requerida por la API v2 de Turso con el campo 'requests'
     payload = {
-        "statements": [{"q": stmt} for stmt in statements]
+        "requests": [
+            {
+                "type": "execute",
+                "stmt": {
+                    "sql": stmt
+                }
+            } for stmt in statements
+        ] + [{"type": "close"}]
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -100,9 +100,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = str(update.effective_chat.id)
 
     try:
-        # Consulta SQL parametrizada simulada para el pipeline REST de Turso
-        # Nota: Turso acepta consultas directas limpias o con parámetros en su API v2
-        sql = f"INSERT INTO peliculas (chat_id, titulo) VALUES ('{chat_id}', '{texto_mensaje.replace("'", "''")}')"
+        # Sanitización básica de comillas simples para evitar errores SQL
+        titulo_escaped = texto_mensaje.replace("'", "''")
+        sql = f"INSERT INTO peliculas (chat_id, titulo) VALUES ('{chat_id}', '{titulo_escaped}')"
         
         await ejecutar_turso_sql([sql])
 
