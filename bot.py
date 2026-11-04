@@ -8,9 +8,7 @@ from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters
+    CallbackQueryHandler
 )
 
 logging.basicConfig(
@@ -23,54 +21,57 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 
-# 👉 Aquí ya está colocado tu ID. Si luego tienes otro admin, solo agrégalo con una coma, ej: [6709726108, 987654321]
-ADMINS_IDS = [6709726108]  
+# Administrador principal (Dueño absoluto)
+SUPER_ADMIN_ID = 6709726108  
 
 if not TELEGRAM_TOKEN or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     logger.critical("Faltan variables de entorno obligatorias.")
     raise ValueError("Configura TELEGRAM_TOKEN, TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.")
 
-# Textos traducidos del bot
 TEXTOS = {
     "es": {
-        "start": "¡Hola {nombre}! 🎬\n\n• **Para buscar:** Usa `/buscar [nombre]`\n• **Para cambiar idioma:** Usa `/idioma`",
-        "no_permiso": "⛔ No tienes permisos para guardar películas. Este bot es de uso público para buscar, pero solo los administradores autorizados pueden subir contenido.",
+        "start": "¡Hola {nombre}! 🎬\n\n¿Qué película, serie o anime buscas?\n\n• **Para buscar:** Usa `/buscar [nombre]`\n• **Para cambiar idioma:** Usa `/idioma`",
+        "no_permiso": "⛔ No tienes permisos para realizar esta acción.",
         "falta_video": "⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.",
-        "falta_nombre": "⚠️ Debes indicar un nombre. Ejemplo: `/guardar It`",
-        "guardando": "📺 Guardando: *{titulo}*\n¿A qué temporada pertenece este capítulo?",
+        "falta_nombre": "⚠️ Debes indicar un nombre. Ejemplo: `/guardar Naruto`",
+        "guardando": "📺 Guardando: *{titulo}*\n¿A qué temporada pertenece este capítulo o es película única?",
         "exito_guardar": "✅ ¡Guardado exitosamente!\n📁 *{titulo}*",
-        "buscando": "🔍 Encontré '{query}'. Selecciona la temporada que deseas ver:",
+        "buscando": "🔍 Encontré '{query}'. Selecciona lo que deseas ver:",
         "no_encontrado": "🔍 No encontré nada relacionado o disponible con '{query}'.",
-        "donde_enviar": "📍 ¿Dónde prefieres recibir los capítulos de *{titulo}* ({temporada})?",
+        "donde_enviar": "📍 ¿Dónde prefieres recibir: *{titulo}*?",
         "btn_grupo": "💬 En este chat",
         "btn_privado": "🔒 En mensaje privado",
-        "enviando_grupo": "🎬 Enviando capítulos al grupo...",
-        "enviando_privado": "✅ ¡Te he enviado los capítulos a tu chat privado!",
-        "aviso_privado": "🎬 Aquí tienes los capítulos solicitados de *{titulo}* ({temporada}):",
-        "error_privado": "⚠️ No pude enviarte los mensajes al privado. Por favor, abre primero un chat privado conmigo y dale a **Iniciar** (/start), luego vuelve a intentarlo.",
+        "enviando_grupo": "🎬 Enviando...",
+        "enviando_privado": "✅ ¡Te lo he enviado a tu chat privado!",
+        "aviso_privado": "🎬 Aquí tienes tu archivo solicitado: *{titulo}*",
+        "error_privado": "⚠️ No pude enviarte mensajes al privado. Abre un chat privado conmigo y dale a **Iniciar** (/start).",
         "error_gen": "❌ Ocurrió un error al procesar tu solicitud.",
         "elegir_idioma": "🌐 Selecciona tu idioma preferido / Select your preferred language:",
-        "idioma_cambiado": "✅ ¡Idioma cambiado a Español con éxito!"
+        "idioma_cambiado": "✅ ¡Idioma cambiado a Español con éxito!",
+        "admin_agregado": "✅ ¡Usuario agregado como administrador correctamente!",
+        "admin_eliminado": "✅ ¡Administrador removido correctamente!"
     },
     "en": {
-        "start": "Hello {nombre}! 🎬\n\n• **To search:** Use `/buscar [name]`\n• **To change language:** Use `/idioma`",
-        "no_permiso": "⛔ You don't have permission to save movies. This bot is public for searching, but only authorized admins can upload content.",
+        "start": "Hello {nombre}! 🎬\n\nWhat movie, series, or anime are you looking for?\n\n• **To search:** Use `/buscar [name]`\n• **To change language:** Use `/idioma`",
+        "no_permiso": "⛔ You don't have permission to perform this action.",
         "falta_video": "⚠️ You must reply with `/guardar [name]` directly to a **video**.",
-        "falta_nombre": "⚠️ You must specify a name. Example: `/guardar It`",
-        "guardando": "📺 Saving: *{titulo}*\nWhich season does this episode belong to?",
+        "falta_nombre": "⚠️ You must specify a name. Example: `/guardar Naruto`",
+        "guardando": "📺 Saving: *{titulo}*\nWhich season does this belong to, or is it a single movie?",
         "exito_guardar": "✅ Successfully saved!\n📁 *{titulo}*",
-        "buscando": "🔍 Found '{query}'. Select the season you want to watch:",
+        "buscando": "🔍 Found '{query}'. Select what you want to watch:",
         "no_encontrado": "🔍 No results found for '{query}'.",
-        "donde_enviar": "📍 Where do you want to receive the episodes for *{titulo}* ({temporada})?",
+        "donde_enviar": "📍 Where do you want to receive: *{titulo}*?",
         "btn_grupo": "💬 In this chat",
-        "btn_privado": "🔒 In private message",
-        "enviando_grupo": "🎬 Sending episodes to the group...",
-        "enviando_privado": "✅ I have sent the episodes to your private chat!",
-        "aviso_privado": "🎬 Here are your requested episodes for *{titulo}* ({temporada}):",
-        "error_privado": "⚠️ I couldn't send you a private message. Please open a private chat with me first and press **Start** (/start), then try again.",
-        "error_gen": "❌ An error occurred while processing your request.",
+        "btn_privado": "In private message",
+        "enviando_grupo": "🎬 Sending...",
+        "enviando_privado": "✅ I have sent it to your private chat!",
+        "aviso_privado": "🎬 Here is your requested file: *{titulo}*",
+        "error_privado": "⚠️ I couldn't send you a private message. Please open a private chat with me first and press **Start** (/start).",
+        "error_gen": "An error occurred while processing your request.",
         "elegir_idioma": "🌐 Selecciona tu idioma preferido / Select your preferred language:",
-        "idioma_cambiado": "✅ Language successfully changed to English!"
+        "idioma_cambiado": "✅ Language successfully changed to English!",
+        "admin_agregado": "✅ User successfully added as an administrator!",
+        "admin_eliminado": "✅ Administrator successfully removed!"
     }
 }
 
@@ -132,7 +133,7 @@ async def init_db() -> None:
             chat_id TEXT NOT NULL,
             titulo TEXT NOT NULL,
             file_id TEXT,
-            temporada TEXT DEFAULT 'Temporada 1',
+            temporada TEXT DEFAULT 'General',
             creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
@@ -142,19 +143,41 @@ async def init_db() -> None:
             idioma TEXT DEFAULT 'es'
         )
     """
-    await ejecutar_turso_sql([sql_peliculas, sql_usuarios])
+    sql_admins = """
+        CREATE TABLE IF NOT EXISTS admins (
+            user_id TEXT PRIMARY KEY
+        )
+    """
+    sql_config = """
+        CREATE TABLE IF NOT EXISTS config (
+            clave TEXT PRIMARY KEY,
+            valor TEXT
+        )
+    """
+    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config])
 
+    # Asegurar que el super admin siempre esté en la tabla
     try:
-        await ejecutar_turso_sql(["ALTER TABLE peliculas ADD COLUMN file_id TEXT"])
-    except Exception:
-        pass
-    
-    try:
-        await ejecutar_turso_sql(["ALTER TABLE peliculas ADD COLUMN temporada TEXT DEFAULT 'Temporada 1'"])
+        await ejecutar_turso_sql([f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{SUPER_ADMIN_ID}')"])
     except Exception:
         pass
 
     logger.info("Base de datos y tablas verificadas correctamente.")
+
+async def es_admin(user_id: int) -> bool:
+    if user_id == SUPER_ADMIN_ID:
+        return True
+    try:
+        sql = f"SELECT user_id FROM admins WHERE user_id = '{user_id}'"
+        resultado = await ejecutar_turso_sql([sql])
+        results_list = resultado.get("results", [])
+        if results_list and "response" in results_list[0]:
+            rows = results_list[0]["response"].get("result", {}).get("rows", [])
+            if rows:
+                return True
+    except Exception:
+        pass
+    return False
 
 async def obtener_idioma_usuario(user_id: int) -> str:
     try:
@@ -173,8 +196,120 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user and update.message:
         user_id = update.effective_user.id
         lang = await obtener_idioma_usuario(user_id)
+        
+        # Verificar si hay una bienvenida personalizada en la base de datos
+        try:
+            sql = "SELECT valor FROM config WHERE clave = 'bienvenida_texto'"
+            res = await ejecutar_turso_sql([sql])
+            rows = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if rows and "value" in rows[0][0]:
+                texto_personalizado = str(rows[0][0]["value"])
+                
+                # Revisar si hay imagen guardada
+                sql_img = "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
+                res_img = await ejecutar_turso_sql([sql_img])
+                rows_img = res_img.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+                img_url = rows_img[0][0].get("value") if rows_img and "value" in rows_img[0][0] else None
+
+                if img_url and img_url != "None":
+                    await update.message.reply_photo(photo=img_url, caption=texto_personalizado, parse_mode="Markdown")
+                    return
+                else:
+                    await update.message.reply_text(texto_personalizado, parse_mode="Markdown")
+                    return
+        except Exception:
+            pass
+
+        # Bienvenida por defecto
         texto = TEXTOS[lang]["start"].format(nombre=update.effective_user.first_name)
         await update.message.reply_text(texto, parse_mode="Markdown")
+
+# Comando para añadir admin: /addadmin [ID]
+async def agregar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    lang = await obtener_idioma_usuario(user_id)
+
+    if user_id != SUPER_ADMIN_ID:
+        await update.message.reply_text("⛔ Solo el dueño principal puede agregar administradores.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text("⚠️ Debes indicar el ID del usuario. Ejemplo: `/addadmin 123456789`", parse_mode="Markdown")
+        return
+
+    nuevo_admin_id = args[0].strip()
+    try:
+        sql = f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{nuevo_admin_id}')"
+        await ejecutar_turso_sql([sql])
+        await update.message.reply_text(TEXTOS[lang]["admin_agregado"])
+    except Exception as e:
+        logger.error(f"Error al agregar admin: {e}")
+        await update.message.reply_text(TEXTOS[lang]["error_gen"])
+
+# Comando para quitar admin: /deladmin [ID]
+async def quitar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    lang = await obtener_idioma_usuario(user_id)
+
+    if user_id != SUPER_ADMIN_ID:
+        await update.message.reply_text("⛔ Solo el dueño principal puede quitar administradores.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text("⚠️ Debes indicar el ID del usuario. Ejemplo: `/deladmin 123456789`", parse_mode="Markdown")
+        return
+
+    admin_a_borrar = args[0].strip()
+    if int(admin_a_borrar) == SUPER_ADMIN_ID:
+        await update.message.reply_text("⚠️ No puedes eliminar al dueño principal.")
+        return
+
+    try:
+        sql = f"DELETE FROM admins WHERE user_id = '{admin_a_borrar}'"
+        await ejecutar_turso_sql([sql])
+        await update.message.reply_text(TEXTOS[lang]["admin_eliminado"])
+    except Exception as e:
+        logger.error(f"Error al quitar admin: {e}")
+        await update.message.reply_text(TEXTOS[lang]["error_gen"])
+
+# Comando para configurar bienvenida en grupos: Responde a una foto con /setbienvenida [Texto] o envíalo con texto
+async def configurar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para configurar la bienvenida.")
+        return
+
+    texto_args = " ".join(context.args).strip()
+    photo_obj = update.message.photo or (update.message.reply_to_message and update.message.reply_to_message.photo)
+    
+    if not texto_args and not photo_obj:
+        await update.message.reply_text("⚠️ Uso: Envía una imagen con el comando `/setbienvenida [Tu texto]` o responde a una foto con el comando.", parse_mode="Markdown")
+        return
+
+    file_id_img = photo_obj[-1].file_id if photo_obj else "None"
+    
+    try:
+        if texto_args:
+            sql_txt = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_texto', '{texto_args.replace("'", "''")}')"
+            await ejecutar_turso_sql([sql_txt])
+        
+        if file_id_img != "None":
+            sql_img = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_img', '{file_id_img}')"
+            await ejecutar_turso_sql([sql_img])
+
+        await update.message.reply_text("✅ ¡Mensaje y diseño de bienvenida actualizado con éxito para grupos y chats!")
+    except Exception as e:
+        logger.error(f"Error guardando bienvenida: {e}")
+        await update.message.reply_text("❌ Error al guardar la configuración.")
 
 async def configurar_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
@@ -216,7 +351,7 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.message.from_user.id
     lang = await obtener_idioma_usuario(user_id)
 
-    if user_id not in ADMINS_IDS:
+    if not await es_admin(user_id):
         await update.message.reply_text(TEXTOS[lang]["no_permiso"])
         return
 
@@ -322,7 +457,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         query_escaped = query_texto.replace("'", "''").lower()
-        sql = f"SELECT DISTINCT temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
+        sql = f"SELECT DISTINCT temporada, titulo FROM peliculas WHERE LOWER(titulo) = '{query_escaped}' OR LOWER(titulo) LIKE '{query_escaped} (%'"
         resultado = await ejecutar_turso_sql([sql])
         
         rows = []
@@ -331,19 +466,37 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             if results_list and "response" in results_list[0]:
                 rows = results_list[0]["response"].get("result", {}).get("rows", [])
         except Exception as parse_err:
-            logger.error(f"Error parseando temporadas: {parse_err}")
+            logger.error(f"Error parseando resultados: {parse_err}")
+
+        if not rows:
+            sql_alt = f"SELECT DISTINCT temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
+            resultado_alt = await ejecutar_turso_sql([sql_alt])
+            try:
+                results_alt_list = resultado_alt.get("results", [])
+                if results_alt_list and "response" in results_alt_list[0]:
+                    rows = results_alt_list[0]["response"].get("result", {}).get("rows", [])
+            except Exception:
+                pass
 
         if rows:
             keyboard = []
             for row in rows:
-                temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else "Temporada 1"
-                button_text = f"📺 {query_texto} - {temporada}"
-                callback_data = f"seltemp_{query_texto}_{temporada}"
+                temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else "General"
+                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else query_texto
+                
+                if temporada == "General":
+                    button_text = f"🎬 {titulo_encontrado}"
+                    callback_data = f"seltemp_{titulo_encontrado}_General"
+                else:
+                    button_text = f"📺 {query_texto} - {temporada}"
+                    callback_data = f"seltemp_{query_texto}_{temporada}"
                 
                 if len(callback_data.encode('utf-8')) > 64:
                     callback_data = callback_data[:63]
                 
-                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+                btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
+                if btn_tuple not in keyboard:
+                    keyboard.append(btn_tuple)
 
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(
@@ -364,7 +517,8 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
     if not data.startswith("seltemp_"):
         return
 
-    parts = data.replace("seltemp_", "").rsplit("_", 1)
+    resto = data.replace("seltemp_", "")
+    parts = resto.rsplit("_", 1)
     if len(parts) != 2:
         await query.edit_message_text("❌ Error.")
         return
@@ -380,8 +534,10 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    texto_mostrar = titulo_busqueda if temporada == "General" else f"{titulo_busqueda} ({temporada})"
     await query.edit_message_text(
-        TEXTOS[lang]["donde_enviar"].format(titulo=titulo_busqueda, temporada=temporada),
+        TEXTOS[lang]["donde_enviar"].format(titulo=texto_mostrar),
         parse_mode="Markdown",
         reply_markup=reply_markup
     )
@@ -410,7 +566,12 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         titulo_escaped = titulo_busqueda.replace("'", "''").lower()
         temp_escaped = temporada.replace("'", "''")
-        sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}'"
+        
+        if temporada == "General":
+            sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
+        else:
+            sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}'"
+            
         resultado = await ejecutar_turso_sql([sql])
         
         rows = []
@@ -419,14 +580,14 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if results_list and "response" in results_list[0]:
                 rows = results_list[0]["response"].get("result", {}).get("rows", [])
         except Exception as parse_err:
-            logger.error(f"Error parseando episodios: {parse_err}")
+            logger.error(f"Error parseando archivos: {parse_err}")
 
         if rows:
             if modo == "priv":
                 try:
                     await context.bot.send_message(
                         chat_id=user_id,
-                        text=TEXTOS[lang]["aviso_privado"].format(titulo=titulo_busqueda, temporada=temporada),
+                        text=TEXTOS[lang]["aviso_privado"].format(titulo=titulo_busqueda),
                         parse_mode="Markdown"
                     )
                     for row in rows:
@@ -455,9 +616,9 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
                             caption=f"📁 {nombre_cap}"
                         )
         else:
-            await query.edit_message_text("⚠️ No videos found.")
+            await query.edit_message_text("⚠️ No files found.")
     except Exception as e:
-        logger.error(f"Error al enviar videos: {e}", exc_info=True)
+        logger.error(f"Error al enviar archivos: {e}", exc_info=True)
         await query.message.reply_text(TEXTOS[lang]["error_gen"])
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -471,6 +632,9 @@ def main() -> None:
     application.add_handler(CommandHandler("idioma", configurar_idioma))
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
     application.add_handler(CommandHandler("buscar", buscar_pelicula))
+    application.add_handler(CommandHandler("addadmin", agregar_admin))
+    application.add_handler(CommandHandler("deladmin", quitar_admin))
+    application.add_handler(CommandHandler("setbienvenida", configurar_bienvenida))
     application.add_handler(CallbackQueryHandler(boton_idioma, pattern="^lang_"))
     application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
     application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
