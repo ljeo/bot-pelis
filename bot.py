@@ -1,10 +1,10 @@
 import os
 import logging
+import httpx
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
-from libsql_client import create_client
 
-# Configuración profesional de logs
+# Configuración de logs
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -24,10 +24,10 @@ if not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     logger.critical("Las credenciales de Turso (URL o Token) no están configuradas correctamente.")
     raise ValueError("Las credenciales de Turso son obligatorias.")
 
-def get_turso_url() -> str:
+def get_turso_rest_url() -> str:
     """
-    Normaliza y asegura que la URL de Turso utilice HTTPS estándar 
-    para evitar conflictos de WebSockets (wss://) en entornos de la nube como Render.
+    Convierte la URL de Turso al formato de API REST HTTP estándar (https://),
+    evitando por completo cualquier intento de conexión por WebSockets (wss:// o libsql://).
     """
     url = TURSO_DATABASE_URL.strip()
     if url.startswith("libsql://"):
@@ -36,21 +36,50 @@ def get_turso_url() -> str:
         url = url.replace("wss://", "https://", 1)
     elif not url.startswith("https://"):
         url = f"https://{url}"
+    
+    # Asegurar que termine en /v2/pipeline para la API HTTP de Turso
+    if not url.endswith("/v2/p") and not url.endswith("/v2/pipeline"):
+        url = url.rstrip("/") + "/v2/pipeline"
     return url
 
+async def ejecutar_turso_sql(statements: list) -> dict:
+    """
+    Ejecuta consultas SQL directamente contra el API REST HTTP de Turso 
+    de forma asíncrona y segura mediante httpx.
+    """
+    url = get_turso_rest_url()
+    headers = {
+        "Authorization": f"Bearer {TURSO_AUTH_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # Formato de payload requerido por el API REST de Turso (libSQL/Sqld)
+    payload = {
+        "statements": [{"q": stmt} for stmt in statements]
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(url, json=payload, headers=headers)
+        if response.status_code != 200:
+            raise Exception(f"Turso API error HTTP {response.status_code}: {response.text}")
+        return response.json()
+
 async def init_db() -> None:
-    """Inicializa la estructura de la base de datos de manera segura."""
-    url = get_turso_url()
-    async with create_client(url=url, auth_token=TURSO_AUTH_TOKEN) as client:
-        await client.execute("""
+    """Inicializa la tabla en Turso usando peticiones HTTP REST."""
+    try:
+        sql = """
             CREATE TABLE IF NOT EXISTS peliculas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id TEXT NOT NULL,
                 titulo TEXT NOT NULL,
                 creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-    logger.info("Base de datos y tabla 'peliculas' verificadas correctamente.")
+        """
+        await ejecutar_turso_sql([sql])
+        logger.info("Base de datos y tabla 'peliculas' verificadas correctamente vía HTTP REST.")
+    except Exception as e:
+        logger.critical(f"Error al inicializar la base de datos vía HTTP REST: {e}")
+        raise
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manejador para el comando /start."""
@@ -59,11 +88,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     user_name = update.effective_user.first_name
     await update.message.reply_text(
-        f"¡Hola {user_name}! 🎬 Envíame el nombre o la información de la película que deseas guardar en tu base de datos de Turso."
+        f"¡Hola {user_name}! 🎬 Envíame el nombre o la información de la película que deseas guardar."
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Maneja los mensajes de texto entrantes y los almacena en Turso de forma atómica."""
+    """Maneja los mensajes de texto entrantes y los almacena en Turso mediante HTTP REST."""
     if not update.message or not update.message.text:
         return
 
@@ -71,39 +100,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = str(update.effective_chat.id)
 
     try:
-        url = get_turso_url()
-        # Uso estricto de contexto asíncrono para prevenir fugas de sesiones (Unclosed client session)
-        async with create_client(url=url, auth_token=TURSO_AUTH_TOKEN) as client:
-            await client.execute(
-                "INSERT INTO peliculas (chat_id, titulo) VALUES (?, ?)",
-                [chat_id, texto_mensaje]
-            )
+        # Consulta SQL parametrizada simulada para el pipeline REST de Turso
+        # Nota: Turso acepta consultas directas limpias o con parámetros en su API v2
+        sql = f"INSERT INTO peliculas (chat_id, titulo) VALUES ('{chat_id}', '{texto_mensaje.replace("'", "''")}')"
+        
+        await ejecutar_turso_sql([sql])
 
         await update.message.reply_text("✅ ¡Película guardada exitosamente en Turso!")
         logger.info(f"Película guardada para el chat {chat_id}: {texto_mensaje}")
 
     except Exception as e:
-        logger.error(f"Error crítico al interactuar con Turso: {e}", exc_info=True)
-        await update.message.reply_text("❌ Ocurrió un error al guardar en la base de datos. Inténtalo de nuevo más tarde.")
+        logger.error(f"Error crítico al insertar en Turso: {e}", exc_info=True)
+        await update.message.reply_text("❌ Ocurrió un error al guardar en la base de datos. Inténtalo de nuevo.")
 
 def main() -> None:
     """Punto de entrada principal para la ejecución del bot."""
-    # Construcción de la aplicación de Telegram
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # Registro de manejadores (Handlers)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    # Inicializar base de datos de forma síncrona antes de arrancar el bot de polling
     import asyncio
     try:
         asyncio.run(init_db())
-    except Exception as e:
-        logger.critical(f"No se pudo inicializar la base de datos al arrancar: {e}")
+    except Exception:
         return
 
-    # Iniciar el bot mediante Long Polling
     logger.info("Iniciando el bot en modo Polling...")
     application.run_polling(drop_pending_updates=True)
 
