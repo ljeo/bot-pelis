@@ -21,16 +21,25 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 
-# Administrador principal (Dueño absoluto)
 SUPER_ADMIN_ID = 6709726108  
 
 if not TELEGRAM_TOKEN or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     logger.critical("Faltan variables de entorno obligatorias.")
     raise ValueError("Configura TELEGRAM_TOKEN, TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.")
 
+TEXTO_BIENVENIDA_DEFAULT = (
+    "🎬 **¡Bienvenidos al mejor bot de películas, series y animes!** 🍿\n\n"
+    "¿Qué película, serie o anime buscas hoy? Encuentra todo tu contenido favorito de forma rápida y sin saturar el chat.\n\n"
+    "📌 **Comandos disponibles:**\n"
+    "• 🔍 `/buscar [nombre]` — Busca y recibe tus archivos al instante.\n"
+    "• 🌐 `/idioma` — Cambia el idioma del bot (Español / English).\n"
+    "• 📬 *Al buscar, podrás elegir si prefieres recibir el contenido aquí en el grupo o por mensaje privado (DM).*\n\n"
+    "¡Disfruta del entretenimiento! 🚀"
+)
+
 TEXTOS = {
     "es": {
-        "start": "¡Hola {nombre}! 🎬\n\n¿Qué película, serie o anime buscas?\n\n• **Para buscar:** Usa `/buscar [nombre]`\n• **Para cambiar idioma:** Usa `/idioma`",
+        "start": TEXTO_BIENVENIDA_DEFAULT,
         "no_permiso": "⛔ No tienes permisos para realizar esta acción.",
         "falta_video": "⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.",
         "falta_nombre": "⚠️ Debes indicar un nombre. Ejemplo: `/guardar Naruto`",
@@ -52,7 +61,14 @@ TEXTOS = {
         "admin_eliminado": "✅ ¡Administrador removido correctamente!"
     },
     "en": {
-        "start": "Hello {nombre}! 🎬\n\nWhat movie, series, or anime are you looking for?\n\n• **To search:** Use `/buscar [name]`\n• **To change language:** Use `/idioma`",
+        "start": (
+            "🎬 **Welcome to the best movies, series and anime bot!** 🍿\n\n"
+            "What movie, series, or anime are you looking for today?\n\n"
+            "📌 **Available commands:**\n"
+            "• 🔍 `/buscar [name]` — Search and get files instantly.\n"
+            "• 🌐 `/idioma` — Change bot language.\n\n"
+            "Enjoy the entertainment! 🚀"
+        ),
         "no_permiso": "⛔ You don't have permission to perform this action.",
         "falta_video": "⚠️ You must reply with `/guardar [name]` directly to a **video**.",
         "falta_nombre": "⚠️ You must specify a name. Example: `/guardar Naruto`",
@@ -62,7 +78,7 @@ TEXTOS = {
         "no_encontrado": "🔍 No results found for '{query}'.",
         "donde_enviar": "📍 Where do you want to receive: *{titulo}*?",
         "btn_grupo": "💬 In this chat",
-        "btn_privado": "In private message",
+        "btn_privado": "🔒 In private message",
         "enviando_grupo": "🎬 Sending...",
         "enviando_privado": "✅ I have sent it to your private chat!",
         "aviso_privado": "🎬 Here is your requested file: *{titulo}*",
@@ -156,7 +172,6 @@ async def init_db() -> None:
     """
     await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config])
 
-    # Asegurar que el super admin siempre esté en la tabla
     try:
         await ejecutar_turso_sql([f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{SUPER_ADMIN_ID}')"])
     except Exception:
@@ -197,34 +212,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         lang = await obtener_idioma_usuario(user_id)
         
-        # Verificar si hay una bienvenida personalizada en la base de datos
         try:
-            sql = "SELECT valor FROM config WHERE clave = 'bienvenida_texto'"
-            res = await ejecutar_turso_sql([sql])
-            rows = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            if rows and "value" in rows[0][0]:
-                texto_personalizado = str(rows[0][0]["value"])
-                
-                # Revisar si hay imagen guardada
-                sql_img = "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
-                res_img = await ejecutar_turso_sql([sql_img])
-                rows_img = res_img.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-                img_url = rows_img[0][0].get("value") if rows_img and "value" in rows_img[0][0] else None
+            sql_img = "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
+            res_img = await ejecutar_turso_sql([sql_img])
+            rows_img = res_img.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            img_url = rows_img[0][0].get("value") if rows_img and "value" in rows_img[0][0] else None
 
-                if img_url and img_url != "None":
-                    await update.message.reply_photo(photo=img_url, caption=texto_personalizado, parse_mode="Markdown")
-                    return
-                else:
-                    await update.message.reply_text(texto_personalizado, parse_mode="Markdown")
-                    return
+            texto_personalizado = TEXTOS[lang]["start"]
+
+            if img_url and img_url != "None":
+                await update.message.reply_photo(photo=img_url, caption=texto_personalizado, parse_mode="Markdown")
+                return
         except Exception:
             pass
 
-        # Bienvenida por defecto
-        texto = TEXTOS[lang]["start"].format(nombre=update.effective_user.first_name)
+        texto = TEXTOS[lang]["start"]
         await update.message.reply_text(texto, parse_mode="Markdown")
 
-# Comando para añadir admin: /addadmin [ID]
 async def agregar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
         return
@@ -249,7 +253,6 @@ async def agregar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error(f"Error al agregar admin: {e}")
         await update.message.reply_text(TEXTOS[lang]["error_gen"])
 
-# Comando para quitar admin: /deladmin [ID]
 async def quitar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
         return
@@ -278,7 +281,6 @@ async def quitar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.error(f"Error al quitar admin: {e}")
         await update.message.reply_text(TEXTOS[lang]["error_gen"])
 
-# Comando para configurar bienvenida en grupos: Responde a una foto con /setbienvenida [Texto] o envíalo con texto
 async def configurar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
         return
@@ -288,28 +290,38 @@ async def configurar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("⛔ No tienes permisos para configurar la bienvenida.")
         return
 
-    texto_args = " ".join(context.args).strip()
     photo_obj = update.message.photo or (update.message.reply_to_message and update.message.reply_to_message.photo)
     
-    if not texto_args and not photo_obj:
-        await update.message.reply_text("⚠️ Uso: Envía una imagen con el comando `/setbienvenida [Tu texto]` o responde a una foto con el comando.", parse_mode="Markdown")
+    if not photo_obj:
+        await update.message.reply_text("⚠️ Debes enviar o responder a una foto con el comando `/setbienvenida` para establecer la imagen de bienvenida.", parse_mode="Markdown")
         return
 
-    file_id_img = photo_obj[-1].file_id if photo_obj else "None"
+    file_id_img = photo_obj[-1].file_id
     
     try:
-        if texto_args:
-            sql_txt = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_texto', '{texto_args.replace("'", "''")}')"
-            await ejecutar_turso_sql([sql_txt])
-        
-        if file_id_img != "None":
-            sql_img = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_img', '{file_id_img}')"
-            await ejecutar_turso_sql([sql_img])
-
-        await update.message.reply_text("✅ ¡Mensaje y diseño de bienvenida actualizado con éxito para grupos y chats!")
+        sql_img = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_img', '{file_id_img}')"
+        await ejecutar_turso_sql([sql_img])
+        await update.message.reply_text("✅ ¡Imagen de bienvenida actualizada con éxito!")
     except Exception as e:
         logger.error(f"Error guardando bienvenida: {e}")
         await update.message.reply_text("❌ Error al guardar la configuración.")
+
+async def eliminar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    try:
+        sql = "DELETE FROM config WHERE clave = 'bienvenida_img'"
+        await ejecutar_turso_sql([sql])
+        await update.message.reply_text("✅ ¡Bienvenida personalizada eliminada! Ahora el bot enviará solo el texto predeterminado al usar /start.")
+    except Exception as e:
+        logger.error(f"Error eliminando bienvenida: {e}")
+        await update.message.reply_text("❌ Error al eliminar la configuración.")
 
 async def configurar_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
@@ -590,65 +602,4 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         text=TEXTOS[lang]["aviso_privado"].format(titulo=titulo_busqueda),
                         parse_mode="Markdown"
                     )
-                    for row in rows:
-                        file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
-                        nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
-
-                        if file_id and file_id != "None":
-                            await context.bot.send_video(
-                                chat_id=user_id,
-                                video=file_id,
-                                caption=f"📁 {nombre_cap}"
-                            )
-                    await query.edit_message_text(TEXTOS[lang]["enviando_privado"])
-                except Exception:
-                    await query.edit_message_text(TEXTOS[lang]["error_privado"])
-            else:
-                await query.edit_message_text(TEXTOS[lang]["enviando_grupo"])
-                for row in rows:
-                    file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
-                    nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
-
-                    if file_id and file_id != "None":
-                        await context.bot.send_video(
-                            chat_id=chat_actual_id,
-                            video=file_id,
-                            caption=f"📁 {nombre_cap}"
-                        )
-        else:
-            await query.edit_message_text("⚠️ No files found.")
-    except Exception as e:
-        logger.error(f"Error al enviar archivos: {e}", exc_info=True)
-        await query.message.reply_text(TEXTOS[lang]["error_gen"])
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Excepción global capturada:", exc_info=context.error)
-
-def main() -> None:
-    threading.Thread(target=start_server, daemon=True).start()
-
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("idioma", configurar_idioma))
-    application.add_handler(CommandHandler("guardar", guardar_pelicula))
-    application.add_handler(CommandHandler("buscar", buscar_pelicula))
-    application.add_handler(CommandHandler("addadmin", agregar_admin))
-    application.add_handler(CommandHandler("deladmin", quitar_admin))
-    application.add_handler(CommandHandler("setbienvenida", configurar_bienvenida))
-    application.add_handler(CallbackQueryHandler(boton_idioma, pattern="^lang_"))
-    application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
-    application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
-    application.add_handler(CallbackQueryHandler(boton_ver_episodio, pattern="^(send_chat_|send_priv_)"))
-    application.add_error_handler(error_handler)
-
-    import asyncio
-    try:
-        asyncio.run(init_db())
-    except Exception as e:
-        logger.error(f"No se pudo inicializar la BD: {e}")
-
-    logger.info("Iniciando polling del bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
+                    for row in rows
