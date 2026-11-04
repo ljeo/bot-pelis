@@ -8,7 +8,9 @@ from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
-    CallbackQueryHandler
+    CallbackQueryHandler,
+    MessageHandler,
+    filters
 )
 
 logging.basicConfig(
@@ -59,35 +61,6 @@ TEXTOS = {
         "idioma_cambiado": "✅ ¡Idioma cambiado a Español con éxito!",
         "admin_agregado": "✅ ¡Usuario agregado como administrador correctamente!",
         "admin_eliminado": "✅ ¡Administrador removido correctamente!"
-    },
-    "en": {
-        "start": (
-            "🎬 **Welcome to the best movies, series and anime bot!** 🍿\n\n"
-            "What movie, series, or anime are you looking for today?\n\n"
-            "📌 **Available commands:**\n"
-            "• 🔍 `/buscar [name]` — Search and get files instantly.\n"
-            "• 🌐 `/idioma` — Change bot language.\n\n"
-            "Enjoy the entertainment! 🚀"
-        ),
-        "no_permiso": "⛔ You don't have permission to perform this action.",
-        "falta_video": "⚠️ You must reply with `/guardar [name]` directly to a **video**.",
-        "falta_nombre": "⚠️ You must specify a name. Example: `/guardar Naruto`",
-        "guardando": "📺 Saving: *{titulo}*\nWhich season does this belong to, or is it a single movie?",
-        "exito_guardar": "✅ Successfully saved!\n📁 *{titulo}*",
-        "buscando": "🔍 Found '{query}'. Select what you want to watch:",
-        "no_encontrado": "🔍 No results found for '{query}'.",
-        "donde_enviar": "📍 Where do you want to receive: *{titulo}*?",
-        "btn_grupo": "💬 In this chat",
-        "btn_privado": "🔒 In private message",
-        "enviando_grupo": "🎬 Sending...",
-        "enviando_privado": "✅ I have sent it to your private chat!",
-        "aviso_privado": "🎬 Here is your requested file: *{titulo}*",
-        "error_privado": "⚠️ I couldn't send you a private message. Please open a private chat with me first and press **Start** (/start).",
-        "error_gen": "An error occurred while processing your request.",
-        "elegir_idioma": "🌐 Selecciona tu idioma preferido / Select your preferred language:",
-        "idioma_cambiado": "✅ Language successfully changed to English!",
-        "admin_agregado": "✅ User successfully added as an administrator!",
-        "admin_eliminado": "✅ Administrator successfully removed!"
     }
 }
 
@@ -242,6 +215,107 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             await update.message.reply_text(texto_final, parse_mode="Markdown")
 
+async def menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para configurar la bienvenida.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("🖼️ Agregar / Cambiar Foto", callback_data="cfg_set_foto")],
+        [InlineKeyboardButton("📝 Agregar / Cambiar Texto", callback_data="cfg_set_texto")],
+        [InlineKeyboardButton("🗑️ Eliminar Imagen", callback_data="cfg_del_foto"),
+         InlineKeyboardButton("🗑️ Eliminar Texto", callback_data="cfg_del_texto")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🎛️ **Panel de Configuración de Bienvenida**\n\nSelecciona qué deseas configurar:", reply_markup=reply_markup, parse_mode="Markdown")
+
+async def callback_menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "cfg_set_foto":
+        context.user_data["esperando_foto_bienvenida"] = True
+        context.user_data.pop("esperando_texto_bienvenida", None)
+        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+        await query.edit_message_text("🖼️ Envía la **imagen** que deseas usar para la bienvenida.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cfg_set_texto":
+        context.user_data["esperando_texto_bienvenida"] = True
+        context.user_data.pop("esperando_foto_bienvenida", None)
+        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+        await query.edit_message_text("📝 Envía el **texto** largo de bienvenida con tus saltos de línea normales.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cfg_del_foto":
+        try:
+            await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_img'"])
+            await query.edit_message_text("✅ ¡Imagen de bienvenida eliminada con éxito!")
+        except Exception:
+            await query.edit_message_text("❌ Error al eliminar la imagen.")
+
+    elif data == "cfg_del_texto":
+        try:
+            await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_texto'"])
+            await query.edit_message_text("✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
+        except Exception:
+            await query.edit_message_text("❌ Error al eliminar el texto.")
+
+    elif data == "cfg_volver":
+        context.user_data.pop("esperando_foto_bienvenida", None)
+        context.user_data.pop("esperando_texto_bienvenida", None)
+        keyboard = [
+            [InlineKeyboardButton("🖼️ Agregar / Cambiar Foto", callback_data="cfg_set_foto")],
+            [InlineKeyboardButton("📝 Agregar / Cambiar Texto", callback_data="cfg_set_texto")],
+            [InlineKeyboardButton("🗑️ Eliminar Imagen", callback_data="cfg_del_foto"),
+             InlineKeyboardButton("🗑️ Eliminar Texto", callback_data="cfg_del_texto")]
+        ]
+        await query.edit_message_text("🎛️ **Panel de Configuración de Bienvenida**\n\nSelecciona qué deseas configurar:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    if not await es_admin(user_id):
+        return
+
+    # Capturar Foto
+    if context.user_data.get("esperando_foto_bienvenida"):
+        if update.message.photo:
+            file_id_img = update.message.photo[-1].file_id
+            try:
+                sql = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_img', '{file_id_img}')"
+                await ejecutar_turso_sql([sql])
+                context.user_data.pop("esperando_foto_bienvenida", None)
+                
+                keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+                await update.message.reply_text("✅ ¡Imagen establecida correctamente!", reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception:
+                await update.message.reply_text("❌ Ocurrió un error al guardar la imagen.")
+        else:
+            await update.message.reply_text("⚠️ Por favor, envía una **imagen válida**.")
+        return
+
+    # Capturar Texto
+    if context.user_data.get("esperando_texto_bienvenida"):
+        texto_ingresado = update.message.text
+        if texto_ingresado:
+            try:
+                texto_escaped = texto_ingresado.replace("'", "''")
+                sql = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_texto', '{texto_escaped}')"
+                await ejecutar_turso_sql([sql])
+                context.user_data.pop("esperando_texto_bienvenida", None)
+                
+                keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+                await update.message.reply_text("✅ ¡Texto de bienvenida establecido correctamente con tus saltos de línea!", reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception:
+                await update.message.reply_text("❌ Ocurrió un error al guardar el texto.")
+        else:
+            await update.message.reply_text("⚠️ Por favor, envía un **texto válido**.")
+        return
+
 async def agregar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
         return
@@ -261,16 +335,15 @@ async def agregar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         sql = f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{nuevo_admin_id}')"
         await ejecutar_turso_sql([sql])
-        await update.message.reply_text(TEXTOS[lang]["admin_agregado"])
+        await update.message.reply_text("✅ ¡Usuario agregado como administrador correctamente!")
     except Exception as e:
         logger.error(f"Error al agregar admin: {e}")
-        await update.message.reply_text(TEXTOS[lang]["error_gen"])
+        await update.message.reply_text("❌ Error al procesar.")
 
 async def quitar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
         return
     user_id = update.effective_user.id
-    lang = await obtener_idioma_usuario(user_id)
 
     if user_id != SUPER_ADMIN_ID:
         await update.message.reply_text("⛔ Solo el dueño principal puede quitar administradores.")
@@ -289,75 +362,10 @@ async def quitar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         sql = f"DELETE FROM admins WHERE user_id = '{admin_a_borrar}'"
         await ejecutar_turso_sql([sql])
-        await update.message.reply_text(TEXTOS[lang]["admin_eliminado"])
+        await update.message.reply_text("✅ ¡Administrador removido correctamente!")
     except Exception as e:
         logger.error(f"Error al quitar admin: {e}")
-        await update.message.reply_text(TEXTOS[lang]["error_gen"])
-
-async def configurar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
-        return
-    user_id = update.effective_user.id
-
-    if not await es_admin(user_id):
-        await update.message.reply_text("⛔ No tienes permisos para configurar la bienvenida.")
-        return
-
-    texto_args = " ".join(context.args).strip()
-    photo_obj = update.message.photo or (update.message.reply_to_message and update.message.reply_to_message.photo)
-    
-    if not photo_obj and not texto_args:
-        await update.message.reply_text("⚠️ Uso: Envía una foto con el comando `/setbienvenida` o responde a una foto con él.", parse_mode="Markdown")
-        return
-
-    try:
-        if photo_obj:
-            file_id_img = photo_obj[-1].file_id
-            sql_img = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_img', '{file_id_img}')"
-            await ejecutar_turso_sql([sql_img])
-        
-        if texto_args:
-            sql_txt = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_texto', '{texto_args.replace(\"'\", \"''\")}')"
-            await ejecutar_turso_sql([sql_txt])
-
-        await update.message.reply_text("✅ ¡Bienvenida actualizada con éxito!")
-    except Exception as e:
-        logger.error(f"Error guardando bienvenida: {e}")
-        await update.message.reply_text(f"❌ Error al guardar: {e}")
-
-async def eliminar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
-        return
-    user_id = update.effective_user.id
-
-    if not await es_admin(user_id):
-        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
-        return
-
-    try:
-        sql = "DELETE FROM config WHERE clave = 'bienvenida_img'"
-        await ejecutar_turso_sql([sql])
-        await update.message.reply_text("✅ ¡Imagen de bienvenida eliminada con éxito!")
-    except Exception as e:
-        logger.error(f"Error eliminando imagen: {e}")
-        await update.message.reply_text(f"❌ Error al eliminar la imagen: {e}")
-
-async def eliminar_texto_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
-        return
-    user_id = update.effective_user.id
-
-    if not await es_admin(user_id):
-        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
-        return
-
-    try:
-        sql = "DELETE FROM config WHERE clave = 'bienvenida_texto'"
-        await ejecutar_turso_sql([sql])
-        await update.message.reply_text("✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
-    except Exception as e:
-        logger.error(f"Error eliminando texto: {e}")
-        await update.message.reply_text(f"❌ Error al eliminar el texto: {e}")
+        await update.message.reply_text("❌ Error al procesar.")
 
 async def configurar_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
@@ -371,7 +379,7 @@ async def configurar_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     reply_markup = InlineKeyboardMarkup(keyboard)
     user_id = update.effective_user.id
     lang = await obtener_idioma_usuario(user_id)
-    await update.message.reply_text(TEXTOS[lang]["elegir_idioma"], reply_markup=reply_markup)
+    await update.message.reply_text("🌐 Selecciona tu idioma preferido / Select your preferred language:", reply_markup=reply_markup)
 
 async def boton_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -397,20 +405,18 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     user_id = update.message.from_user.id
-    lang = await obtener_idioma_usuario(user_id)
-
     if not await es_admin(user_id):
-        await update.message.reply_text(TEXTOS[lang]["no_permiso"])
+        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
         return
 
     video_obj = update.message.video or (update.message.reply_to_message and update.message.reply_to_message.video)
     if not video_obj:
-        await update.message.reply_text(TEXTOS[lang]["falta_video"])
+        await update.message.reply_text("⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.", parse_mode="Markdown")
         return
 
     texto_args = " ".join(context.args).strip()
     if not texto_args:
-        await update.message.reply_text(TEXTOS[lang]["falta_nombre"])
+        await update.message.reply_text("⚠️ Debes indicar un nombre. Ejemplo: `/guardar Naruto`", parse_mode="Markdown")
         return
 
     context.user_data["pending_file_id"] = video_obj.file_id
@@ -431,7 +437,7 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        TEXTOS[lang]["guardando"].format(titulo=texto_args),
+        f"📺 Guardando: *{texto_args}*\n¿A qué temporada pertenece este capítulo o es película única?",
         parse_mode="Markdown",
         reply_markup=reply_markup
     )
@@ -448,8 +454,6 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
     file_id = context.user_data.get("pending_file_id")
     titulo_base = context.user_data.get("pending_titulo")
     chat_id = str(query.message.chat_id)
-    user_id = query.from_user.id
-    lang = await obtener_idioma_usuario(user_id)
 
     if not file_id or not titulo_base:
         await query.edit_message_text("❌ Session expired. Try /guardar again.")
@@ -486,17 +490,15 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
         sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_guardar_escaped}')"
         await ejecutar_turso_sql([sql_insert])
         
-        await query.edit_message_text(TEXTOS[lang]["exito_guardar"].format(titulo=titulo_final), parse_mode="Markdown")
+        await query.edit_message_text(f"✅ ¡Guardado exitosamente!\n📁 *{titulo_final}*", parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error al guardar episodio: {e}", exc_info=True)
-        await query.edit_message_text(TEXTOS[lang]["error_gen"])
+        await query.edit_message_text("❌ Ocurrió un error al procesar tu solicitud.")
 
 async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
     
-    user_id = update.effective_user.id
-    lang = await obtener_idioma_usuario(user_id)
     query_texto = " ".join(context.args).strip()
     
     if not query_texto:
@@ -513,8 +515,8 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             results_list = resultado.get("results", [])
             if results_list and "response" in results_list[0]:
                 rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception as parse_err:
-            logger.error(f"Error parseando resultados: {parse_err}")
+        except Exception:
+            pass
 
         if not rows:
             sql_alt = f"SELECT DISTINCT temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
@@ -547,15 +549,12 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     keyboard.append(btn_tuple)
 
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                TEXTOS[lang]["buscando"].format(query=query_texto),
-                reply_markup=reply_markup
-            )
+            await update.message.reply_text(f"🔍 Encontré '{query_texto}'. Selecciona lo que deseas ver:", reply_markup=reply_markup)
         else:
-            await update.message.reply_text(TEXTOS[lang]["no_encontrado"].format(query=query_texto))
+            await update.message.reply_text(f"🔍 No encontré nada relacionado o disponible con '{query_texto}'.")
     except Exception as e:
         logger.error(f"Error al buscar: {e}", exc_info=True)
-        await update.message.reply_text(TEXTOS[lang]["error_gen"])
+        await update.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
 
 async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -572,23 +571,15 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
         return
 
     titulo_busqueda, temporada = parts
-    user_id = query.from_user.id
-    lang = await obtener_idioma_usuario(user_id)
-
     keyboard = [
         [
-            InlineKeyboardButton(TEXTOS[lang]["btn_grupo"], callback_data=f"send_chat_{titulo_busqueda}_{temporada}"),
-            InlineKeyboardButton(TEXTOS[lang]["btn_privado"], callback_data=f"send_priv_{titulo_busqueda}_{temporada}")
+            InlineKeyboardButton("💬 En este chat", callback_data=f"send_chat_{titulo_busqueda}_{temporada}"),
+            InlineKeyboardButton("🔒 En mensaje privado", callback_data=f"send_priv_{titulo_busqueda}_{temporada}")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     texto_mostrar = titulo_busqueda if temporada == "General" else f"{titulo_busqueda} ({temporada})"
-    await query.edit_message_text(
-        TEXTOS[lang]["donde_enviar"].format(titulo=texto_mostrar),
-        parse_mode="Markdown",
-        reply_markup=reply_markup
-    )
+    await query.edit_message_text(f"📍 ¿Dónde prefieres recibir: *{texto_mostrar}*?", parse_mode="Markdown", reply_markup=reply_markup)
 
 async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -608,7 +599,6 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     titulo_busqueda, temporada = parts
     user_id = query.from_user.id
-    lang = await obtener_idioma_usuario(user_id)
     chat_actual_id = query.message.chat_id
 
     try:
@@ -621,15 +611,75 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
             sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}'"
             
         resultado = await ejecutar_turso_sql([sql])
-        
         rows = []
         try:
             results_list = resultado.get("results", [])
             if results_list and "response" in results_list[0]:
                 rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception as parse_err:
-            logger.error(f"Error parseando archivos: {parse_err}")
+        except Exception:
+            pass
 
         if rows:
             if modo == "priv":
                 try:
+                    await context.bot.send_message(chat_id=user_id, text=f"🎬 Aquí tienes tu archivo solicitado: *{titulo_busqueda}*", parse_mode="Markdown")
+                    for row in rows:
+                        file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
+                        nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
+                        if file_id and file_id != "None":
+                            await context.bot.send_video(chat_id=user_id, video=file_id, caption=f"📁 {nombre_cap}")
+                    await query.edit_message_text("✅ ¡Te lo he enviado a tu chat privado!")
+                except Exception:
+                    await query.edit_message_text("⚠️ No pude enviarte mensajes al privado. Abre un chat privado conmigo y dale a **Iniciar** (/start).")
+            else:
+                await query.edit_message_text("🎬 Enviando...")
+                for row in rows:
+                    file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
+                    nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
+                    if file_id and file_id != "None":
+                        await context.bot.send_video(chat_id=chat_actual_id, video=file_id, caption=f"📁 {nombre_cap}")
+        else:
+            await query.edit_message_text("⚠️ No files found.")
+    except Exception as e:
+        logger.error(f"Error al enviar archivos: {e}", exc_info=True)
+        await query.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Excepción global capturada:", exc_info=context.error)
+
+def main() -> None:
+    threading.Thread(target=start_server, daemon=True).start()
+
+    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("idioma", configurar_idioma))
+    application.add_handler(CommandHandler("guardar", guardar_pelicula))
+    application.add_handler(CommandHandler("buscar", buscar_pelicula))
+    application.add_handler(CommandHandler("addadmin", agregar_admin))
+    application.add_handler(CommandHandler("deladmin", quitar_admin))
+    
+    # Nuevo menú de bienvenida interactivo por botones
+    application.add_handler(CommandHandler("setbienvenida", menu_bienvenida))
+    application.add_handler(CallbackQueryHandler(callback_menu_bienvenida, pattern="^cfg_"))
+    
+    # Capturador de imágenes o textos cuando el admin presiona el botón respectivo
+    application.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, manejar_captura_config))
+
+    application.add_handler(CallbackQueryHandler(boton_idioma, pattern="^lang_"))
+    application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
+    application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
+    application.add_handler(CallbackQueryHandler(boton_ver_episodio, pattern="^(send_chat_|send_priv_)"))
+    application.add_error_handler(error_handler)
+
+    import asyncio
+    try:
+        asyncio.run(init_db())
+    except Exception as e:
+        logger.error(f"No se pudo inicializar la BD: {e}")
+
+    logger.info("Iniciando polling del bot...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
