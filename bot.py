@@ -1,10 +1,10 @@
 import logging
-import sqlite3
 import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+import libsql_client
 
 # Configurar el sistema de registros (logs)
 logging.basicConfig(
@@ -31,26 +31,32 @@ def run_web_server():
     server.serve_forever()
 # ------------------------------------------------------------------
 
-# Configuración y conexión a la base de datos SQLite
-DB_NAME = "peliculas.db"
+# Configuración y conexión a Turso (libSQL)
+TURSO_URL = os.getenv("TURSO_DATABASE_URL")
+TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+
+def get_db_client():
+    return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS peliculas (
-            nombre TEXT PRIMARY KEY,
-            file_id TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+    try:
+        client = get_db_client()
+        client.execute("""
+            CREATE TABLE IF NOT EXISTS peliculas (
+                nombre TEXT PRIMARY KEY,
+                file_id TEXT NOT NULL
+            )
+        """)
+        client.close()
+        logger.info("📦 Base de datos en Turso inicializada correctamente.")
+    except Exception as e:
+        logger.error(f"Error al inicializar la base de datos en Turso: {e}")
 
 init_db()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "¡Hola! Envíame un video con el nombre de la película en la descripción (caption) para guardarlo, o escríbelo luego para buscarlo."
+        "¡Hola! Envíame un video con el nombre de la película en la descripción (caption) para guardarlo en la nube, o escríbelo luego para buscarlo."
     )
 
 async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -63,13 +69,14 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nombre = nombre.lower().strip()
         
         try:
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO peliculas (nombre, file_id) VALUES (?, ?)", (nombre, file_id))
-            conn.commit()
-            conn.close()
+            client = get_db_client()
+            client.execute(
+                "INSERT OR REPLACE INTO peliculas (nombre, file_id) VALUES (?, ?)", 
+                [nombre, file_id]
+            )
+            client.close()
             
-            await mensaje.reply_text(f"✅ ¡Película guardada con éxito como: '{nombre}'!")
+            await mensaje.reply_text(f"✅ ¡Película guardada con éxito en Turso como: '{nombre}'!")
         except Exception as e:
             logger.error(f"Error al guardar en la base de datos: {e}")
             await mensaje.reply_text("❌ Hubo un error al guardar la película en la base de datos.")
@@ -81,21 +88,23 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT file_id FROM peliculas WHERE nombre = ?", (texto_usuario,))
-        resultado = cursor.fetchone()
-        conn.close()
+        client = get_db_client()
+        result = client.execute(
+            "SELECT file_id FROM peliculas WHERE nombre = ?", 
+            [texto_usuario]
+        )
+        client.close()
         
-        if resultado:
-            file_id = resultado[0]
+        # libsql_client devuelve filas en .rows
+        if result.rows:
+            file_id = result.rows[0][0]
             await update.message.reply_video(video=file_id)
         else:
             await update.message.reply_text("❌ No encontré ninguna película con ese nombre.")
             
     except Exception as e:
         logger.error(f"Error al buscar en la base de datos: {e}")
-        await update.message.reply_text("❌ Ocurrió un error al buscar la película.")
+        await mensaje.reply_text("❌ Ocurrió un error al buscar la película.")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="Excepción capturada al procesar una actualización:", exc_info=context.error)
