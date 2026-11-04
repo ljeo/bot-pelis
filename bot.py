@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
@@ -21,7 +22,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is alive and running!")
         
     def log_message(self, format, *args):
-        # Silenciar los logs del servidor web para que no ensucien la consola
         return
 
 def run_web_server():
@@ -31,9 +31,12 @@ def run_web_server():
     server.serve_forever()
 # ------------------------------------------------------------------
 
-# Configuración y conexión a Turso (libSQL)
-TURSO_URL = os.getenv("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+# Configuración y conexión a Turso (libSQL) con corrección automática de protocolo
+TURSO_URL = os.getenv("TURSO_DATABASE_URL", "")
+if TURSO_URL.startswith("https://"):
+    TURSO_URL = TURSO_URL.replace("https://", "libsql://")
+
+TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "")
 
 def get_db_client():
     return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
@@ -52,8 +55,6 @@ async def init_db():
     except Exception as e:
         logger.error(f"Error al inicializar la base de datos en Turso: {e}")
 
-# Ejecutamos la inicialización asíncrona de la base de datos al arrancar
-import asyncio
 try:
     asyncio.run(init_db())
 except Exception:
@@ -95,7 +96,6 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         client = get_db_client()
         busqueda = f"%{texto_usuario}%"
-        # ¡AQUÍ ESTABA EL DETALLE! Agregamos 'await' para que espere el resultado de Turso
         result = await client.execute(
             "SELECT nombre, file_id FROM peliculas WHERE LOWER(nombre) LIKE ?", 
             [busqueda]
@@ -110,13 +110,13 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except Exception as e:
         logger.error(f"Error al buscar en la base de datos: {e}")
-        await mensaje.reply_text("❌ Ocurrió un error al buscar la película.")
+        # Corregido: usamos update.message en lugar de 'mensaje' para evitar NameError
+        await update.message.reply_text("❌ Ocurrió un error al buscar la película.")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(msg="Excepción capturada al procesar una actualización:", exc_info=context.error)
 
 def main():
-    # 1. Iniciar el servidor web falso en un hilo secundario (para que Render detecte el puerto)
     threading.Thread(target=run_web_server, daemon=True).start()
 
     TOKEN = os.getenv("TELEGRAM_TOKEN", "TU_TOKEN_AQUI")
