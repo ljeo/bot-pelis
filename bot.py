@@ -212,27 +212,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_id = update.effective_user.id
         lang = await obtener_idioma_usuario(user_id)
         
+        texto_final = TEXTOS[lang]["start"]
+        img_url = None
+
         try:
             sql_txt = "SELECT valor FROM config WHERE clave = 'bienvenida_texto'"
             res_txt = await ejecutar_turso_sql([sql_txt])
-            rows_txt = res_txt.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            texto_final = rows_txt[0][0].get("value") if rows_txt and "value" in rows_txt[0][0] else TEXTOS[lang]["start"]
-
-            sql_img = "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
-            res_img = await ejecutar_turso_sql([sql_img])
-            rows_img = res_img.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            img_url = rows_img[0][0].get("value") if rows_img and "value" in rows_img[0][0] else None
-
-            if img_url and img_url != "None":
-                await update.message.reply_photo(photo=img_url, caption=texto_final, parse_mode="Markdown")
-                return
-            else:
-                await update.message.reply_text(texto_final, parse_mode="Markdown")
-                return
+            r_list = res_txt.get("results", [])
+            if r_list and "response" in r_list[0]:
+                rows_txt = r_list[0]["response"].get("result", {}).get("rows", [])
+                if rows_txt and rows_txt[0] and "value" in rows_txt[0][0]:
+                    texto_final = rows_txt[0][0]["value"]
         except Exception:
             pass
 
-        await update.message.reply_text(TEXTOS[lang]["start"], parse_mode="Markdown")
+        try:
+            sql_img = "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
+            res_img = await ejecutar_turso_sql([sql_img])
+            r_list_img = res_img.get("results", [])
+            if r_list_img and "response" in r_list_img[0]:
+                rows_img = r_list_img[0]["response"].get("result", {}).get("rows", [])
+                if rows_img and rows_img[0] and "value" in rows_img[0][0]:
+                    img_url = rows_img[0][0]["value"]
+        except Exception:
+            pass
+
+        if img_url and img_url != "None":
+            await update.message.reply_photo(photo=img_url, caption=texto_final, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(texto_final, parse_mode="Markdown")
 
 async def agregar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
@@ -296,3 +304,332 @@ async def configurar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     texto_args = " ".join(context.args).strip()
+    photo_obj = update.message.photo or (update.message.reply_to_message and update.message.reply_to_message.photo)
+    
+    if not photo_obj and not texto_args:
+        await update.message.reply_text("⚠️ Uso: Envía una foto con el comando `/setbienvenida` o responde a una foto con él.", parse_mode="Markdown")
+        return
+
+    try:
+        if photo_obj:
+            file_id_img = photo_obj[-1].file_id
+            sql_img = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_img', '{file_id_img}')"
+            await ejecutar_turso_sql([sql_img])
+        
+        if texto_args:
+            sql_txt = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_texto', '{texto_args.replace(\"'\", \"''\")}')"
+            await ejecutar_turso_sql([sql_txt])
+
+        await update.message.reply_text("✅ ¡Bienvenida actualizada con éxito!")
+    except Exception as e:
+        logger.error(f"Error guardando bienvenida: {e}")
+        await update.message.reply_text(f"❌ Error al guardar: {e}")
+
+async def eliminar_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    try:
+        sql = "DELETE FROM config WHERE clave = 'bienvenida_img'"
+        await ejecutar_turso_sql([sql])
+        await update.message.reply_text("✅ ¡Imagen de bienvenida eliminada con éxito!")
+    except Exception as e:
+        logger.error(f"Error eliminando imagen: {e}")
+        await update.message.reply_text(f"❌ Error al eliminar la imagen: {e}")
+
+async def eliminar_texto_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    try:
+        sql = "DELETE FROM config WHERE clave = 'bienvenida_texto'"
+        await ejecutar_turso_sql([sql])
+        await update.message.reply_text("✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
+    except Exception as e:
+        logger.error(f"Error eliminando texto: {e}")
+        await update.message.reply_text(f"❌ Error al eliminar el texto: {e}")
+
+async def configurar_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    keyboard = [
+        [
+            InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    user_id = update.effective_user.id
+    lang = await obtener_idioma_usuario(user_id)
+    await update.message.reply_text(TEXTOS[lang]["elegir_idioma"], reply_markup=reply_markup)
+
+async def boton_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if not data.startswith("lang_"):
+        return
+
+    nuevo_lang = data.replace("lang_", "")
+    user_id = str(query.from_user.id)
+
+    try:
+        sql = f"INSERT OR REPLACE INTO usuarios_idioma (user_id, idioma) VALUES ('{user_id}', '{nuevo_lang}')"
+        await ejecutar_turso_sql([sql])
+        msg = "✅ ¡Idioma cambiado a Español con éxito!" if nuevo_lang == "es" else "✅ Language successfully changed to English!"
+        await query.edit_message_text(msg)
+    except Exception as e:
+        logger.error(f"Error cambiando idioma: {e}")
+        await query.edit_message_text("❌ Error changing language.")
+
+async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+
+    user_id = update.message.from_user.id
+    lang = await obtener_idioma_usuario(user_id)
+
+    if not await es_admin(user_id):
+        await update.message.reply_text(TEXTOS[lang]["no_permiso"])
+        return
+
+    video_obj = update.message.video or (update.message.reply_to_message and update.message.reply_to_message.video)
+    if not video_obj:
+        await update.message.reply_text(TEXTOS[lang]["falta_video"])
+        return
+
+    texto_args = " ".join(context.args).strip()
+    if not texto_args:
+        await update.message.reply_text(TEXTOS[lang]["falta_nombre"])
+        return
+
+    context.user_data["pending_file_id"] = video_obj.file_id
+    context.user_data["pending_titulo"] = texto_args
+
+    keyboard = [
+        [
+            InlineKeyboardButton("Temporada 1", callback_data="temp_Temporada 1"),
+            InlineKeyboardButton("Temporada 2", callback_data="temp_Temporada 2"),
+        ],
+        [
+            InlineKeyboardButton("Temporada 3", callback_data="temp_Temporada 3"),
+            InlineKeyboardButton("Temporada 4", callback_data="temp_Temporada 4"),
+        ],
+        [
+            InlineKeyboardButton("🎬 Película / Única", callback_data="temp_General"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        TEXTOS[lang]["guardando"].format(titulo=texto_args),
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("temp_"):
+        return
+
+    temporada = data.replace("temp_", "")
+    file_id = context.user_data.get("pending_file_id")
+    titulo_base = context.user_data.get("pending_titulo")
+    chat_id = str(query.message.chat_id)
+    user_id = query.from_user.id
+    lang = await obtener_idioma_usuario(user_id)
+
+    if not file_id or not titulo_base:
+        await query.edit_message_text("❌ Session expired. Try /guardar again.")
+        return
+
+    try:
+        if temporada == "General":
+            titulo_final = titulo_base
+            temp_guardar = "General"
+        else:
+            num_temp = temporada.replace("Temporada ", "").strip()
+            titulo_escaped = titulo_base.replace("'", "''")
+            temp_escaped = temporada.replace("'", "''")
+            sql_count = f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '{titulo_escaped.lower()}%' AND temporada = '{temp_escaped}'"
+            res_count = await ejecutar_turso_sql([sql_count])
+            
+            count = 0
+            try:
+                results_list = res_count.get("results", [])
+                if results_list and "response" in results_list[0]:
+                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
+                    if rows and "value" in rows[0][0]:
+                        count = int(rows[0][0]["value"])
+            except Exception:
+                count = 0
+
+            siguiente_cap = count + 1
+            titulo_final = f"{titulo_base} ({num_temp}x{siguiente_cap})"
+            temp_guardar = temporada
+
+        titulo_final_escaped = titulo_final.replace("'", "''")
+        temp_guardar_escaped = temp_guardar.replace("'", "''")
+        
+        sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_guardar_escaped}')"
+        await ejecutar_turso_sql([sql_insert])
+        
+        await query.edit_message_text(TEXTOS[lang]["exito_guardar"].format(titulo=titulo_final), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error al guardar episodio: {e}", exc_info=True)
+        await query.edit_message_text(TEXTOS[lang]["error_gen"])
+
+async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    
+    user_id = update.effective_user.id
+    lang = await obtener_idioma_usuario(user_id)
+    query_texto = " ".join(context.args).strip()
+    
+    if not query_texto:
+        await update.message.reply_text("⚠️ Ejemplo: `/buscar Naruto`", parse_mode="Markdown")
+        return
+
+    try:
+        query_escaped = query_texto.replace("'", "''").lower()
+        sql = f"SELECT DISTINCT temporada, titulo FROM peliculas WHERE LOWER(titulo) = '{query_escaped}' OR LOWER(titulo) LIKE '{query_escaped} (%'"
+        resultado = await ejecutar_turso_sql([sql])
+        
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+        except Exception as parse_err:
+            logger.error(f"Error parseando resultados: {parse_err}")
+
+        if not rows:
+            sql_alt = f"SELECT DISTINCT temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
+            resultado_alt = await ejecutar_turso_sql([sql_alt])
+            try:
+                results_alt_list = resultado_alt.get("results", [])
+                if results_alt_list and "response" in results_alt_list[0]:
+                    rows = results_alt_list[0]["response"].get("result", {}).get("rows", [])
+            except Exception:
+                pass
+
+        if rows:
+            keyboard = []
+            for row in rows:
+                temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else "General"
+                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else query_texto
+                
+                if temporada == "General":
+                    button_text = f"🎬 {titulo_encontrado}"
+                    callback_data = f"seltemp_{titulo_encontrado}_General"
+                else:
+                    button_text = f"📺 {query_texto} - {temporada}"
+                    callback_data = f"seltemp_{query_texto}_{temporada}"
+                
+                if len(callback_data.encode('utf-8')) > 64:
+                    callback_data = callback_data[:63]
+                
+                btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
+                if btn_tuple not in keyboard:
+                    keyboard.append(btn_tuple)
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                TEXTOS[lang]["buscando"].format(query=query_texto),
+                reply_markup=reply_markup
+            )
+        else:
+            await update.message.reply_text(TEXTOS[lang]["no_encontrado"].format(query=query_texto))
+    except Exception as e:
+        logger.error(f"Error al buscar: {e}", exc_info=True)
+        await update.message.reply_text(TEXTOS[lang]["error_gen"])
+
+async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("seltemp_"):
+        return
+
+    resto = data.replace("seltemp_", "")
+    parts = resto.rsplit("_", 1)
+    if len(parts) != 2:
+        await query.edit_message_text("❌ Error.")
+        return
+
+    titulo_busqueda, temporada = parts
+    user_id = query.from_user.id
+    lang = await obtener_idioma_usuario(user_id)
+
+    keyboard = [
+        [
+            InlineKeyboardButton(TEXTOS[lang]["btn_grupo"], callback_data=f"send_chat_{titulo_busqueda}_{temporada}"),
+            InlineKeyboardButton(TEXTOS[lang]["btn_privado"], callback_data=f"send_priv_{titulo_busqueda}_{temporada}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    texto_mostrar = titulo_busqueda if temporada == "General" else f"{titulo_busqueda} ({temporada})"
+    await query.edit_message_text(
+        TEXTOS[lang]["donde_enviar"].format(titulo=texto_mostrar),
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("send_"):
+        return
+
+    modo = "chat" if "send_chat_" in data else "priv"
+    limpio = data.replace("send_chat_", "").replace("send_priv_", "")
+    
+    parts = limpio.rsplit("_", 1)
+    if len(parts) != 2:
+        await query.edit_message_text("❌ Error.")
+        return
+
+    titulo_busqueda, temporada = parts
+    user_id = query.from_user.id
+    lang = await obtener_idioma_usuario(user_id)
+    chat_actual_id = query.message.chat_id
+
+    try:
+        titulo_escaped = titulo_busqueda.replace("'", "''").lower()
+        temp_escaped = temporada.replace("'", "''")
+        
+        if temporada == "General":
+            sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
+        else:
+            sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}'"
+            
+        resultado = await ejecutar_turso_sql([sql])
+        
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+        except Exception as parse_err:
+            logger.error(f"Error parseando archivos: {parse_err}")
+
+        if rows:
+            if modo == "priv":
+                try:
