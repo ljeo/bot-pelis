@@ -75,19 +75,6 @@ def start_server():
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
     server.serve_forever()
 
-async def editar_o_enviar(query, text, reply_markup=None, parse_mode=None):
-    try:
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-    except Exception:
-        try:
-            await query.edit_message_caption(caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
-        except Exception:
-            try:
-                await query.message.delete()
-            except Exception:
-                pass
-            await query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-
 def get_turso_rest_url() -> str:
     url = TURSO_DATABASE_URL.strip()
     if url.startswith("libsql://"):
@@ -237,6 +224,11 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
     await query.answer()
     
     try:
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+
         sql = "SELECT DISTINCT titulo FROM peliculas WHERE temporada = 'General' ORDER BY id DESC LIMIT 20"
         resultado = await ejecutar_turso_sql([sql])
         rows = []
@@ -262,111 +254,10 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         if rows:
-            await editar_o_enviar(query, "🎬 **Películas Registradas (Más recientes primero):**\n\nSelecciona la película que deseas ver:", reply_markup=reply_markup, parse_mode="Markdown")
+            await query.message.reply_text("🎬 **Películas Registradas (Más recientes primero):**\n\nSelecciona la película que deseas ver:", reply_markup=reply_markup, parse_mode="Markdown")
         else:
-            await editar_o_enviar(query, "⚠️ No hay películas registradas todavía.", reply_markup=reply_markup)
+            await query.message.reply_text("⚠️ No hay películas registradas todavía.", reply_markup=reply_markup)
     except Exception as e:
         logger.error(f"Error cargando películas: {e}")
-        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
-        await editar_o_enviar(query, "❌ Ocurrió un error al cargar las películas.", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    
-    try:
-        sql = "SELECT DISTINCT titulo, temporada FROM peliculas WHERE temporada != 'General' ORDER BY id DESC LIMIT 20"
-        resultado = await ejecutar_turso_sql([sql])
-        rows = []
         try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
-
-        keyboard = []
-        if rows:
-            for row in rows:
-                titulo = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
-                temp = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else "Temporada 1"
-                if not titulo:
-                    continue
-                
-                nombre_base = titulo.split(" (")[0] if " (" in titulo else titulo
-                callback_data = f"seltemp_{nombre_base}_{temp}"
-                if len(callback_data.encode('utf-8')) > 64:
-                    callback_data = callback_data[:63]
-                
-                btn_tuple = [InlineKeyboardButton(f"📺 {nombre_base} ({temp})", callback_data=callback_data)]
-                if btn_tuple not in keyboard:
-                    keyboard.append(btn_tuple)
-
-        keyboard.append([InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        if rows:
-            await editar_o_enviar(query, "📺 **Series y Animes Registrados (Más recientes primero):**\n\nSelecciona la temporada que deseas ver:", reply_markup=reply_markup, parse_mode="Markdown")
-        else:
-            await editar_o_enviar(query, "⚠️ No hay series o animes registrados todavía.", reply_markup=reply_markup)
-    except Exception as e:
-        logger.error(f"Error cargando series: {e}")
-        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
-        await editar_o_enviar(query, "❌ Ocurrió un error al cargar las series.", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def catalogo_volver_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    
-    keyboard = [
-        [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
-         InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await editar_o_enviar(query, "🎬 **Menú Principal del Bot**\n\nSelecciona una categoría o busca directamente usando `/buscar [nombre]`.", reply_markup=reply_markup, parse_mode="Markdown")
-
-async def menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
-        return
-    user_id = update.effective_user.id
-    if not await es_admin(user_id):
-        await update.message.reply_text("⛔ No tienes permisos para configurar la bienvenida.")
-        return
-
-    keyboard = [
-        [InlineKeyboardButton("🖼️ Agregar / Cambiar Foto", callback_data="cfg_set_foto")],
-        [InlineKeyboardButton("📝 Agregar / Cambiar Texto", callback_data="cfg_set_texto")],
-        [InlineKeyboardButton("🗑️ Eliminar Imagen", callback_data="cfg_del_foto"),
-         InlineKeyboardButton("🗑️ Eliminar Texto", callback_data="cfg_del_texto")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎛️ **Panel de Configuración de Bienvenida**\n\nSelecciona qué deseas configurar:", reply_markup=reply_markup, parse_mode="Markdown")
-
-async def callback_menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-
-    if data == "cfg_set_foto":
-        context.user_data["esperando_foto_bienvenida"] = True
-        context.user_data.pop("esperando_texto_bienvenida", None)
-        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
-        await editar_o_enviar(query, "🖼️ Envía la **imagen** que deseas usar para la bienvenida.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
-    elif data == "cfg_set_texto":
-        context.user_data["esperando_texto_bienvenida"] = True
-        context.user_data.pop("esperando_foto_bienvenida", None)
-        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
-        await editar_o_enviar(query, "📝 Envía el **texto** largo de bienvenida con tus saltos de línea normales.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
-    elif data == "cfg_del_foto":
-        try:
-            await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_img'"])
-            await editar_o_enviar(query, "✅ ¡Imagen de bienvenida eliminada con éxito!")
-        except Exception:
-            await editar_o_enviar(query, "❌ Error al eliminar la imagen.")
-
-    elif data == "cfg_del_texto":
-        try:
-            await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_texto'"])
-            await editar_o_enviar(query, "✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
+            keyboard = [[InlineKeyboardButton("🔙
