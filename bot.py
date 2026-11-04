@@ -1,6 +1,8 @@
 import os
 import logging
 import httpx
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
@@ -18,6 +20,22 @@ TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 if not TELEGRAM_TOKEN or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     logger.critical("Faltan variables de entorno obligatorias.")
     raise ValueError("Configura TELEGRAM_TOKEN, TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.")
+
+# Servidor HTTP temporal para satisfacer el requisito de puertos de Render en plan gratuito
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive and running!")
+    def log_message(self, format, *args):
+        # Silenciar logs del servidor web falso para mantener limpia la consola
+        return
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
+    logger.info(f"Servidor web falso corriendo en el puerto {port} para Render...")
+    server.serve_forever()
 
 def get_turso_rest_url() -> str:
     url = TURSO_DATABASE_URL.strip()
@@ -84,7 +102,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Guarda una película usando el comando /guardar Nombre"""
     if not update.message or not update.message.text:
         return
 
@@ -106,7 +123,6 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("❌ Ocurrió un error al guardar en la base de datos.")
 
 async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Busca la película en Turso cuando escribes su nombre en el chat"""
     if not update.message or not update.message.text:
         return
 
@@ -143,6 +159,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error("Excepción capturada:", exc_info=context.error)
 
 def main() -> None:
+    # 1. Lanzar el servidor web falso en un hilo secundario para cumplir con Render (Plan Gratuito)
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+
+    # 2. Configurar el bot de Telegram
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
