@@ -63,7 +63,6 @@ async def ejecutar_turso_sql(statements: list) -> dict:
         return response.json()
 
 async def init_db() -> None:
-    # Añadimos la columna file_id para almacenar el identificador del video en Telegram
     sql = """
         CREATE TABLE IF NOT EXISTS peliculas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +87,6 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not update.message:
         return
 
-    # Verificar si el comando se usó respondiendo a un video o si el mensaje trae un video
     video_obj = update.message.video or (update.message.reply_to_message and update.message.reply_to_message.video)
     
     if not video_obj:
@@ -134,12 +132,10 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if rows:
             for row in rows:
-                # Extraer título y file_id de la respuesta de Turso
                 titulo = str(row[0]["value"]) if (isinstance(row, list) and len(row) > 0 and "value" in row[0]) else "Película"
                 file_id = str(row[1]["value"]) if (isinstance(row, list) and len(row) > 1 and "value" in row[1]) else None
 
                 if file_id and file_id != "None":
-                    # Si tiene un video asociado, lo reenvía directamente
                     await update.message.reply_video(video=file_id, caption=f"🎬 Aquí tienes: {titulo}")
                 else:
                     await update.message.reply_text(f"📁 Encontré el registro *{titulo}*, pero no tiene un archivo de video asociado.", parse_mode="Markdown")
@@ -170,4 +166,5 @@ def main() -> None:
     logger.info("Iniciando polling del bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == "__main__(main)")
+if __name__ == "__main__":
+    main()
