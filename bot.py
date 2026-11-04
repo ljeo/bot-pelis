@@ -21,20 +21,19 @@ if not TELEGRAM_TOKEN or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     logger.critical("Faltan variables de entorno obligatorias.")
     raise ValueError("Configura TELEGRAM_TOKEN, TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.")
 
-# Servidor HTTP temporal para satisfacer el requisito de puertos de Render en plan gratuito
+# Servidor HTTP real para satisfacer de inmediato el puerto de Render
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is alive and running!")
     def log_message(self, format, *args):
-        # Silenciar logs del servidor web falso para mantener limpia la consola
         return
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    logger.info(f"Servidor web falso corriendo en el puerto {port} para Render...")
+    logger.info(f"Servidor web obligatorio abierto inmediatamente en el puerto {port}...")
     server.serve_forever()
 
 def get_turso_rest_url() -> str:
@@ -158,11 +157,8 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Excepción capturada:", exc_info=context.error)
 
-def main() -> None:
-    # 1. Lanzar el servidor web falso en un hilo secundario para cumplir con Render (Plan Gratuito)
-    threading.Thread(target=run_dummy_server, daemon=True).start()
-
-    # 2. Configurar el bot de Telegram
+def run_telegram_bot():
+    """Ejecuta el bot de Telegram en un hilo separado."""
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -177,8 +173,15 @@ def main() -> None:
     except Exception:
         return
 
-    logger.info("Iniciando el bot en modo Polling...")
+    logger.info("Iniciando el bot de Telegram en modo Polling...")
     application.run_polling(drop_pending_updates=True)
+
+def main() -> None:
+    # 1. Lanzar el bot de Telegram en un hilo secundario
+    threading.Thread(target=run_telegram_bot, daemon=True).start()
+
+    # 2. Ejecutar el servidor web en el hilo principal para que Render detecte el puerto de inmediato
+    run_dummy_server()
 
 if __name__ == "__main__":
     main()
