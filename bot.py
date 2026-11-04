@@ -48,7 +48,7 @@ TEXTOS = {
         "guardando": "📺 Guardando: *{titulo}*\n¿A qué temporada pertenece este capítulo o es película única?",
         "exito_guardar": "✅ ¡Guardado exitosamente!\n📁 *{titulo}*",
         "buscando": "🔍 Encontré '{query}'. Selecciona lo que deseas ver:",
-        "no_encontrado": "🔍 No encontré nada relacionado o disponible con '{query}':",
+        "no_encontrado": "🔍 No encontré nada relacionado o disponible con '{query}'.",
         "donde_enviar": "📍 ¿Dónde prefieres recibir: *{titulo}*?",
         "btn_grupo": "💬 En este chat",
         "btn_privado": "🔒 En mensaje privado",
@@ -260,7 +260,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         logger.error(f"Error cargando películas: {e}")
         keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
-        await query.message.reply_text("❌ Ocurrió un error al cargar las películas.", reply_markup=reply_markup)
+        await query.message.reply_text("❌ Ocurrió un error al cargar las películas.", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -309,7 +309,7 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         logger.error(f"Error cargando series: {e}")
         keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
-        await query.message.reply_text("❌ Ocurrió un error al cargar las series.", reply_markup=reply_markup)
+        await query.message.reply_text("❌ Ocurrió un error al cargar las series.", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def catalogo_volver_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -708,7 +708,7 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
     titulo_busqueda, temporada = parts
     chat_tipo = query.message.chat.type
 
-    # Si es privado, borramos el menú del catálogo y enviamos directo sin preguntar
+    # Forzamos validación estricta: si es chat privado ('private'), envía directo al usuario sin mostrar botones de grupo
     if chat_tipo == "private":
         try:
             await query.message.delete()
@@ -747,7 +747,7 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
             logger.error(f"Error al enviar archivos en privado: {e}", exc_info=True)
         return
 
-    # Si es grupo, borramos el mensaje del catálogo y enviamos un mensaje de texto nuevo limpio para elegir destino
+    # Si es un grupo (group / supergroup), borramos el catálogo y mostramos los botones de selección DM o Aquí
     try:
         await query.message.delete()
     except Exception:
