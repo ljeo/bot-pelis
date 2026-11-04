@@ -25,7 +25,6 @@ if not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     raise ValueError("Las credenciales de Turso son obligatorias.")
 
 def get_turso_rest_url() -> str:
-    """Normaliza la URL de Turso al endpoint del pipeline HTTP REST (v2/pipeline)."""
     url = TURSO_DATABASE_URL.strip()
     if url.startswith("libsql://"):
         url = url.replace("libsql://", "https://", 1)
@@ -39,14 +38,12 @@ def get_turso_rest_url() -> str:
     return url
 
 async def ejecutar_turso_sql(statements: list) -> dict:
-    """Ejecuta consultas SQL usando el formato de pipeline v2 oficial de Turso."""
     url = get_turso_rest_url()
     headers = {
         "Authorization": f"Bearer {TURSO_AUTH_TOKEN}",
         "Content-Type": "application/json"
     }
     
-    # Estructura requerida por la API v2 de Turso con el campo 'requests'
     payload = {
         "requests": [
             {
@@ -65,7 +62,6 @@ async def ejecutar_turso_sql(statements: list) -> dict:
         return response.json()
 
 async def init_db() -> None:
-    """Inicializa la tabla en Turso usando peticiones HTTP REST."""
     try:
         sql = """
             CREATE TABLE IF NOT EXISTS peliculas (
@@ -82,17 +78,15 @@ async def init_db() -> None:
         raise
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manejador para el comando /start."""
     if not update.effective_user or not update.message:
         return
     
     user_name = update.effective_user.first_name
     await update.message.reply_text(
-        f"¡Hola {user_name}! 🎬 Envíame el nombre o la información de la película que deseas guardar."
+        f"¡Hola {user_name}! 🎬 Envíame el nombre de la película que deseas guardar."
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Maneja los mensajes de texto entrantes y los almacena en Turso mediante HTTP REST."""
     if not update.message or not update.message.text:
         return
 
@@ -100,7 +94,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     chat_id = str(update.effective_chat.id)
 
     try:
-        # Sanitización básica de comillas simples para evitar errores SQL
         titulo_escaped = texto_mensaje.replace("'", "''")
         sql = f"INSERT INTO peliculas (chat_id, titulo) VALUES ('{chat_id}', '{titulo_escaped}')"
         
@@ -111,14 +104,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     except Exception as e:
         logger.error(f"Error crítico al insertar en Turso: {e}", exc_info=True)
-        await update.message.reply_text("❌ Ocurrió un error al guardar en la base de datos. Inténtalo de nuevo.")
+        await update.message.reply_text("❌ Ocurrió un error al guardar en la base de datos.")
+
+# NUEVO: Manejador global de errores para capturar cualquier excepción no controlada
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Excepción capturada por el manejador global:", exc_info=context.error)
 
 def main() -> None:
-    """Punto de entrada principal para la ejecución del bot."""
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
+    # Registrar el manejador de errores global
+    application.add_error_handler(error_handler)
 
     import asyncio
     try:
