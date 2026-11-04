@@ -46,7 +46,7 @@ TEXTOS = {
         "falta_video": "⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.",
         "falta_nombre": "⚠️ Debes indicar un nombre. Ejemplo: `/guardar Naruto`",
         "guardando": "📺 Guardando: *{titulo}*\n¿A qué temporada pertenece este capítulo o es película única?",
-        "exito_guardar": "✅ ¡Guardado exitosamente!\n📁 *{titulo}*",
+        "exito_guardار": "✅ ¡Guardado exitosamente!\n📁 *{titulo}*",
         "buscando": "🔍 Encontré '{query}'. Selecciona lo que deseas ver:",
         "no_encontrado": "🔍 No encontré nada relacionado o disponible con '{query}'.",
         "donde_enviar": "📍 ¿Dónde prefieres recibir: *{titulo}*?",
@@ -156,7 +156,7 @@ async def es_admin(user_id: int) -> bool:
     try:
         sql = f"SELECT user_id FROM admins WHERE user_id = '{user_id}'"
         resultado = await ejecutar_turso_sql([sql])
-        results_list = resultado.get("results", [])
+        results_list = resultado.get("titles", []) or resultado.get("results", [])
         if results_list and "response" in results_list[0]:
             rows = results_list[0]["response"].get("result", {}).get("rows", [])
             if rows:
@@ -182,3 +182,227 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user and update.message:
         user_id = update.effective_user.id
         lang = await obtener_idioma_usuario(user_id)
+        
+        texto_final = TEXTOS[lang]["start"]
+        img_url = None
+
+        try:
+            sql_txt = "SELECT valor FROM config WHERE clave = 'bienvenida_texto'"
+            res_txt = await ejecutar_turso_sql([sql_txt])
+            r_list = res_txt.get("results", [])
+            if r_list and "response" in r_list[0]:
+                rows_txt = r_list[0]["response"].get("result", {}).get("rows", [])
+                if rows_txt and rows_txt[0] and "value" in rows_txt[0][0]:
+                    texto_final = rows_txt[0][0]["value"]
+        except Exception:
+            pass
+
+        try:
+            sql_img = "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
+            res_img = await ejecutar_turso_sql([sql_img])
+            r_list_img = res_img.get("results", [])
+            if r_list_img and "response" in r_list_img[0]:
+                rows_img = r_list_img[0]["response"].get("result", {}).get("rows", [])
+                if rows_img and rows_img[0] and "value" in rows_img[0][0]:
+                    img_url = rows_img[0][0]["value"]
+        except Exception:
+            pass
+
+        keyboard = [
+            [InlineKeyboardButton("📂 Ver Catálogo Registrado", callback_data="catalogo_ver_todo")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if img_url and img_url != "None":
+            await update.message.reply_photo(photo=img_url, caption=texto_final, parse_mode="Markdown", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(texto_final, parse_mode="Markdown", reply_markup=reply_markup)
+
+async def mostrar_catalogo_registrado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    try:
+        # Consulta simplificada sin DISTINCT para evitar bloqueos de formato
+        sql = "SELECT temporada, titulo FROM peliculas LIMIT 15"
+        resultado = await ejecutar_turso_sql([sql])
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+        except Exception:
+            rows = []
+
+        keyboard = []
+        titulos_vistos = set()
+        
+        if rows:
+            for row in rows:
+                try:
+                    temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] and row[0]["value"] is not None else "General"
+                    titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] and row[1]["value"] is not None else ""
+                    
+                    if not titulo_encontrado or titulo_encontrado in titulos_vistos:
+                        continue
+                    
+                    titulos_vistos.add(titulo_encontrado)
+
+                    if temporada == "General":
+                        button_text = f"🎬 {titulo_encontrado}"
+                        callback_data = f"seltemp_{titulo_encontrado}_General"
+                    else:
+                        button_text = f"📺 {titulo_encontrado} ({temporada})"
+                        callback_data = f"seltemp_{titulo_encontrado}_{temporada}"
+                    
+                    if len(callback_data.encode('utf-8')) > 64:
+                        callback_data = callback_data[:63]
+                    
+                    btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
+                    if btn_tuple not in keyboard:
+                        keyboard.append(btn_tuple)
+                except Exception:
+                    continue
+
+        keyboard.append([InlineKeyboardButton("🔙 Volver al Inicio", callback_data="catalogo_volver_inicio")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if len(keyboard) > 1:
+            await query.edit_message_text("📂 **Catálogo de Contenido Registrado:**\n\nSelecciona el título que deseas ver o recibir:", reply_markup=reply_markup, parse_mode="Markdown")
+        else:
+            await query.edit_message_text("⚠️ Aún no hay películas, series o animes registrados en la base de datos.", reply_markup=reply_markup)
+            
+    except Exception as e:
+        logger.error(f"Error cargando catálogo: {e}")
+        keyboard = [[InlineKeyboardButton("🔙 Volver al Inicio", callback_data="catalogo_volver_inicio")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("⚠️ Ocurrió un error al cargar el catálogo. Intenta usar /buscar [nombre].", reply_markup=reply_markup)
+
+async def catalogo_volver_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    keyboard = [[InlineKeyboardButton("📂 Ver Catálogo Registrado", callback_data="catalogo_ver_todo")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text("🎬 **Menú Principal del Bot**\n\nPuedes explorar el catálogo con el botón de abajo o buscar directamente usando `/buscar [nombre]`.", reply_markup=reply_markup, parse_mode="Markdown")
+
+async def menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para configurar la bienvenida.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("🖼️ Agregar / Cambiar Foto", callback_data="cfg_set_foto")],
+        [InlineKeyboardButton("📝 Agregar / Cambiar Texto", callback_data="cfg_set_texto")],
+        [InlineKeyboardButton("🗑️ Eliminar Imagen", callback_data="cfg_del_foto"),
+         InlineKeyboardButton("🗑️ Eliminar Texto", callback_data="cfg_del_texto")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🎛️ **Panel de Configuración de Bienvenida**\n\nSelecciona qué deseas configurar:", reply_markup=reply_markup, parse_mode="Markdown")
+
+async def callback_menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "cfg_set_foto":
+        context.user_data["esperando_foto_bienvenida"] = True
+        context.user_data.pop("esperando_texto_bienvenida", None)
+        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+        await query.edit_message_text("🖼️ Envía la **imagen** que deseas usar para la bienvenida.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cfg_set_texto":
+        context.user_data["esperando_texto_bienvenida"] = True
+        context.user_data.pop("esperando_foto_bienvenida", None)
+        keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+        await query.edit_message_text("📝 Envía el **texto** largo de bienvenida con tus saltos de línea normales.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cfg_del_foto":
+        try:
+            await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_img'"])
+            await query.edit_message_text("✅ ¡Imagen de bienvenida eliminada con éxito!")
+        except Exception:
+            await query.edit_message_text("❌ Error al eliminar la imagen.")
+
+    elif data == "cfg_del_texto":
+        try:
+            await ejecutar_turso_sql(["DELETE FROM config WHERE clave = 'bienvenida_texto'"])
+            await query.edit_message_text("✅ ¡Texto personalizado eliminado! Volvió al texto por defecto.")
+        except Exception:
+            await query.edit_message_text("❌ Error al eliminar el texto.")
+
+    elif data == "cfg_volver":
+        context.user_data.pop("esperando_foto_bienvenida", None)
+        context.user_data.pop("esperando_texto_bienvenida", None)
+        keyboard = [
+            [InlineKeyboardButton("🖼️ Agregar / Cambiar Foto", callback_data="cfg_set_foto")],
+            [InlineKeyboardButton("📝 Agregar / Cambiar Texto", callback_data="cfg_set_texto")],
+            [InlineKeyboardButton("🗑️ Eliminar Imagen", callback_data="cfg_del_foto"),
+             InlineKeyboardButton("🗑️ Eliminar Texto", callback_data="cfg_del_texto")]
+        ]
+        await query.edit_message_text("🎛️ **Panel de Configuración de Bienvenida**\n\nSelecciona qué deseas configurar:", reply_markup=reply_markup, parse_mode="Markdown")
+
+async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    if not await es_admin(user_id):
+        return
+
+    if context.user_data.get("esperando_foto_bienvenida"):
+        if update.message.photo:
+            file_id_img = update.message.photo[-1].file_id
+            try:
+                sql = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_img', '{file_id_img}')"
+                await ejecutar_turso_sql([sql])
+                context.user_data.pop("esperando_foto_bienvenida", None)
+                keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+                await update.message.reply_text("✅ ¡Imagen establecida correctamente!", reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception:
+                await update.message.reply_text("❌ Ocurrió un error al guardar la imagen.")
+        else:
+            await update.message.reply_text("⚠️ Por favor, envía una **imagen válida**.")
+        return
+
+    if context.user_data.get("esperando_texto_bienvenida"):
+        texto_ingresado = update.message.text
+        if texto_ingresado:
+            try:
+                texto_escaped = texto_ingresado.replace("'", "''")
+                sql = f"INSERT OR REPLACE INTO config (clave, valor) VALUES ('bienvenida_texto', '{texto_escaped}')"
+                await ejecutar_turso_sql([sql])
+                context.user_data.pop("esperando_texto_bienvenida", None)
+                keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="cfg_volver")]]
+                await update.message.reply_text("✅ ¡Texto de bienvenida establecido correctamente con tus saltos de línea!", reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception:
+                await update.message.reply_text("❌ Ocurrió un error al guardar el texto.")
+        else:
+            await update.message.reply_text("⚠️ Por favor, envía un **texto válido**.")
+        return
+
+async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+
+    user_id = update.message.from_user.id
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    video_obj = update.message.video or (update.message.reply_to_message and update.message.reply_to_message.video)
+    if not video_obj:
+        await update.message.reply_text("⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.", parse_mode="Markdown")
+        return
+
+    texto_args = " ".join(context.args).strip()
+    if not texto_args:
+        await update.message.reply_text("⚠️ Debes indicar un nombre. Ejemplo: `/guardar Naruto`", parse_mode="Markdown")
+        return
+
+    file_id_subido = video_obj.file_id
+    try:
+        sql_check_file = f"SELECT titulo FROM peliculas WHERE file_id = '{file_id_subido}'"
+        res_file = await ejecutar_turso_sql([sql_check_file])
+        rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows",
