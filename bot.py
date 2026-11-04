@@ -170,7 +170,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Excepción global capturada:", exc_info=context.error)
 
-def main() -> None:
+ def main() -> None
     threading.Thread(target=start_server, daemon=True).start()
 
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
