@@ -21,7 +21,7 @@ if not TELEGRAM_TOKEN or not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
     logger.critical("Faltan variables de entorno obligatorias.")
     raise ValueError("Configura TELEGRAM_TOKEN, TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.")
 
-# Servidor HTTP real para satisfacer de inmediato el puerto de Render
+# Servidor HTTP para el hilo secundario (satisface el puerto de Render)
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -33,7 +33,7 @@ class DummyHandler(BaseHTTPRequestHandler):
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    logger.info(f"Servidor web obligatorio abierto inmediatamente en el puerto {port}...")
+    logger.info(f"Servidor web falso corriendo en el puerto {port}...")
     server.serve_forever()
 
 def get_turso_rest_url() -> str:
@@ -157,8 +157,11 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Excepción capturada:", exc_info=context.error)
 
-def run_telegram_bot():
-    """Ejecuta el bot de Telegram en un hilo separado."""
+def main() -> None:
+    # 1. Lanzar el servidor web falso en un hilo secundario (atiende el puerto de Render)
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+
+    # 2. Configurar y ejecutar el bot de Telegram en el HILO PRINCIPAL (cumple con set_wakeup_fd)
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -175,13 +178,6 @@ def run_telegram_bot():
 
     logger.info("Iniciando el bot de Telegram en modo Polling...")
     application.run_polling(drop_pending_updates=True)
-
-def main() -> None:
-    # 1. Lanzar el bot de Telegram en un hilo secundario
-    threading.Thread(target=run_telegram_bot, daemon=True).start()
-
-    # 2. Ejecutar el servidor web en el hilo principal para que Render detecte el puerto de inmediato
-    run_dummy_server()
 
 if __name__ == "__main__":
     main()
