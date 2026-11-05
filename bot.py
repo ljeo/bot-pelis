@@ -14,6 +14,7 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
+    ChatMemberHandler,
     filters
 )
 
@@ -212,6 +213,42 @@ async def obtener_idioma_usuario(user_id: int) -> str:
     except Exception:
         pass
     return "es"
+
+async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Avisa al grupo si el bot no tiene permisos para borrar mensajes."""
+    cambio = update.my_chat_member
+    if not cambio or cambio.chat.type not in ("group", "supergroup"):
+        return
+
+    nuevo_estado = cambio.new_chat_member
+    estado = nuevo_estado.status
+    puede_borrar = estado == "administrator" and bool(
+        getattr(nuevo_estado, "can_delete_messages", False)
+    )
+
+    if puede_borrar:
+        return
+
+    if estado in ("left", "kicked"):
+        return
+
+    texto = (
+        "⚠️ **¡Necesito permisos de administrador!**\n\n"
+        "Para funcionar correctamente en este grupo y poder borrar los comandos "
+        "de petición después de registrarlos, el dueño del grupo debe añadirme "
+        "como **administrador** y activar el permiso **Eliminar mensajes**.\n\n"
+        "Después de concederme ese permiso, podré completar esa función. "
+        "Las demás funciones disponibles seguirán dependiendo de sus permisos."
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=cambio.chat.id,
+            text=texto,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo avisar sobre permisos en el grupo {cambio.chat.id}: {e}")
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user and update.message:
@@ -1610,6 +1647,7 @@ def main() -> None:
 
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
+    application.add_handler(ChatMemberHandler(revisar_permisos_grupo, ChatMemberHandler.MY_CHAT_MEMBER))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("idioma", configurar_idioma))
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
