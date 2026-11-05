@@ -1445,14 +1445,21 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
 async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
-    
+
     query_texto = " ".join(context.args).strip()
     if not query_texto:
-        await update.message.reply_text("⚠️ Ejemplo: `/buscar Naruto` o `/buscar Merlina temporada 2`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "⚠️ Escribe el nombre que deseas buscar. Ejemplo: `/buscar Merlina`",
+            parse_mode="Markdown"
+        )
         return
 
     try:
-        patron_busqueda_serie = re.match(r"^(.*?)\s+(?:temporada|temp)\s*(\d+)\s*$", query_texto, re.IGNORECASE)
+        patron_busqueda_serie = re.match(
+            r"^(.*?)\\s+(?:temporada|temp)\\s*(\\d+)\\s*$",
+            query_texto,
+            re.IGNORECASE
+        )
         titulo_consulta = patron_busqueda_serie.group(1).strip() if patron_busqueda_serie else query_texto
         temporada_filtro = f"Temporada {int(patron_busqueda_serie.group(2))}" if patron_busqueda_serie else None
         query_escaped = titulo_consulta.replace("'", "''").lower()
@@ -1463,55 +1470,92 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "ORDER BY id DESC"
         )
         resultado = await ejecutar_turso_sql([sql])
-        
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
+        results_list = resultado.get("results", [])
+        rows = results_list[0].get("response", {}).get("result", {}).get("rows", []) if results_list else []
 
-        if not rows and not temporada_filtro:
-            sql_alt = f"SELECT id, temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' ORDER BY id DESC"
-            resultado_alt = await ejecutar_turso_sql([sql_alt])
-            try:
-                results_alt_list = resultado_alt.get("results", [])
-                if results_alt_list and "response" in results_alt_list[0]:
-                    rows = results_alt_list[0]["response"].get("result", {}).get("rows", [])
-            except Exception:
-                pass
+        if not rows:
+            await update.message.reply_text(
+                f"🔍 No encontré nada relacionado o disponible con '{query_texto}'."
+            )
+            return
 
-        if rows:
+        # Si el usuario indicó temporada, conserva la selección directa de esa temporada.
+        if temporada_filtro:
             keyboard = []
-            titulos_vistos = set()
+            vistos = set()
             for row in rows:
                 id_registro = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else ""
                 temporada = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else "General"
-                titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else query_texto
-                
-                nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
-                clave_unica = f"{nombre_base.lower()}_{temporada.lower()}"
-                if clave_unica in titulos_vistos:
+                titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else titulo_consulta
+                nombre_base = titulo_encontrado.split(" (")[0].strip()
+                clave = f"{nombre_base.lower()}_{temporada.lower()}"
+                if not id_registro or clave in vistos:
                     continue
-                titulos_vistos.add(clave_unica)
-                
-                if not id_registro:
-                    continue
-                if temporada == "General":
-                    button_text = f"🎬 {titulo_encontrado}"
-                else:
-                    button_text = f"📺 {nombre_base} - {temporada}"
-                callback_data = f"seltemp_id_{id_registro}_{temporada}"
+                vistos.add(clave)
+                keyboard.append([InlineKeyboardButton(
+                    f"📺 {nombre_base} - {temporada}",
+                    callback_data=f"seltemp_id_{id_registro}_{temporada}"
+                )])
+            await update.message.reply_text(
+                f"🔍 Resultados para '{query_texto}'. Selecciona lo que deseas ver:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
 
-                btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
-                if btn_tuple not in keyboard:
-                    keyboard.append(btn_tuple)
+        peliculas = {}
+        series = {}
+        for row in rows:
+            id_registro = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else ""
+            temporada = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else "General"
+            titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else titulo_consulta
+            if not id_registro:
+                continue
 
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(f"🔍 Encontré '{query_texto}'. Selecciona lo que deseas ver:", reply_markup=reply_markup)
+            nombre_base = titulo_encontrado.split(" (")[0].strip()
+            if temporada == "General":
+                peliculas.setdefault(nombre_base.lower(), (id_registro, titulo_encontrado))
+            else:
+                series.setdefault(nombre_base.lower(), (id_registro, nombre_base))
+
+        if not peliculas and not series:
+            await update.message.reply_text(
+                f"🔍 No encontré nada relacionado o disponible con '{query_texto}'."
+            )
+            return
+
+        keyboard = []
+        # Si el mismo nombre existe como película y serie, se presentan como tipos
+        # separados para que el usuario elija y no se mezclen los contenidos.
+        nombres_pelicula = set(peliculas)
+        nombres_serie = set(series)
+        nombres_duplicados = nombres_pelicula.intersection(nombres_serie)
+
+        if len(nombres_duplicados) == 1 and len(peliculas) == 1 and len(series) == 1:
+            id_pelicula, titulo_pelicula = next(iter(peliculas.values()))
+            id_serie, nombre_serie = next(iter(series.values()))
+            keyboard.append([InlineKeyboardButton(
+                f"🎬 Película: {titulo_pelicula}",
+                callback_data=f"seltemp_id_{id_pelicula}_General"
+            )])
+            keyboard.append([InlineKeyboardButton(
+                f"📺 Serie: {nombre_serie}",
+                callback_data=f"seriestemp_id_{id_serie}"
+            )])
+            texto = f"🔎 Encontré una película y una serie llamadas '{titulo_consulta}'. ¿Cuál buscas?"
         else:
-            await update.message.reply_text(f"🔍 No encontré nada relacionado o disponible con '{query_texto}'.")
+            for id_pelicula, titulo_pelicula in peliculas.values():
+                keyboard.append([InlineKeyboardButton(
+                    f"🎬 {titulo_pelicula}",
+                    callback_data=f"seltemp_id_{id_pelicula}_General"
+                )])
+            for id_serie, nombre_serie in series.values():
+                keyboard.append([InlineKeyboardButton(
+                    f"📺 {nombre_serie} — elegir temporada",
+                    callback_data=f"seriestemp_id_{id_serie}"
+                )])
+            texto = f"🔍 Resultados para '{query_texto}'. Selecciona lo que deseas ver:"
+
+        await update.message.reply_text(texto, reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
         logger.error(f"Error al buscar: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
