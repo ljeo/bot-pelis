@@ -321,8 +321,10 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
         getattr(nuevo_estado, "can_delete_messages", False)
     )
 
-    if puede_borrar:
-        # Si había un aviso pendiente, eliminarlo ahora que el bot ya puede borrar mensajes.
+    if estado == "administrator":
+        # Al convertir al bot en administrador, intentar retirar el aviso
+        # de permisos. Telegram solo permitirá borrarlo si conserva
+        # el permiso necesario para eliminar mensajes.
         try:
             chat_id_sql = str(cambio.chat.id)
             resultado_aviso = await ejecutar_turso_sql([
