@@ -261,16 +261,6 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     file_id = message.video.file_id
     chat_id = str(message.chat_id)
 
-    # Comprobación de duplicado estricto por file_id (para no guardar nunca el mismo video 2 veces)
-    try:
-        sql_check_file = f"SELECT id FROM peliculas WHERE file_id = '{file_id}'"
-        res_file = await ejecutar_turso_sql([sql_check_file])
-        rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-        if rows_file:
-            logger.info(f"Video duplicado omitido por file_id: {raw_title}")
-            return
-    except Exception:
-        pass
 
     # Expresión regular para detectar formatos de serie: 1x01, S01E01, Temporada X, Temp 1, Cap 1, etc.
     series_pattern = re.compile(
@@ -311,6 +301,18 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         titulo_guardar = raw_title
 
     try:
+        sql_check_file = f"SELECT id FROM peliculas WHERE file_id = '{file_id}'"
+        res_file = await ejecutar_turso_sql([sql_check_file])
+        rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if rows_file:
+            titulo_para_notificar = re.sub(r"\\s+\\d{4}$", "", titulo_limpio).strip()
+            await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
+            logger.info(f"Archivo ya registrado; se revisaron solicitudes pendientes: {raw_title}")
+            return
+    except Exception as e_file:
+        logger.error(f"Error comprobando archivo duplicado desde canal: {e_file}", exc_info=True)
+
+    try:
         titulo_escaped = titulo_guardar.replace("'", "''")
         temp_escaped = temporada.replace("'", "''")
         
@@ -319,7 +321,9 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         res_check = await ejecutar_turso_sql([sql_check])
         rows_check = res_check.get("results", [])[0]["response"].get("result", {}).get("rows", [])
         if rows_check:
-            logger.info(f"Contenido duplicado omitido desde canal: {titulo_guardar} ({temporada})")
+            logger.info(f"Contenido duplicado omitido desde canal: {titulo_guardar} ({temporada}); revisando solicitudes pendientes")
+            titulo_para_notificar = re.sub(r"\\s+\\d{4}$", "", titulo_limpio).strip()
+            await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
             return
 
         sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_escaped}', '{file_id}', '{temp_escaped}')"
@@ -818,34 +822,54 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
         await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
 
 async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: str, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Avisa en el chat original a quienes pidieron el contenido recién guardado."""
-    titulo_escaped = titulo_base.replace("'", "''").lower()
-    temporada_escaped = temporada_guardada.replace("'", "''")
-    sql = (
-        "SELECT id, chat_id, user_id FROM solicitudes "
-        f"WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = '{temporada_escaped}'"
-    )
-    resultado = await ejecutar_turso_sql([sql])
+    """Avisa a quienes pidieron el contenido, comparando títulos normalizados."""
+    def normalizar_titulo(valor: str) -> str:
+        valor = (valor or "").lower().strip()
+        valor = re.sub(r"\\s+\\d{4}$", "", valor)
+        valor = re.sub(r"\\b(temporada|temp)\\s*\\d+\\b", "", valor)
+        valor = re.sub(r"\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[sS]\\d{1,2}[eE]\\d{1,2}\\b", "", valor)
+        valor = re.sub(r"[^a-z0-9áéíóúüñ]", "", valor)
+        return valor
+
+    titulo_objetivo = normalizar_titulo(titulo_base)
+    temporada_objetivo = (temporada_guardada or "General").strip().lower()
+    if not titulo_objetivo:
+        logger.warning("No se pudo determinar el título para buscar solicitudes pendientes.")
+        return
+
+    # Leemos las solicitudes pendientes y comparamos en Python para tolerar
+    # diferencias de mayúsculas, signos, año y formato de temporada/episodio.
+    resultado = await ejecutar_turso_sql([
+        "SELECT id, chat_id, user_id, titulo, temporada FROM solicitudes"
+    ])
     results = resultado.get("results", [])
     rows = results[0].get("response", {}).get("result", {}).get("rows", []) if results else []
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("🎬 Ver catálogo de películas", callback_data="cat_peliculas"),
         InlineKeyboardButton("📺 Ver catálogo de series", callback_data="cat_series")
     ]])
+
     for row in rows:
         solicitud_id = int(row[0]["value"])
         chat_id = int(row[1]["value"])
         user_id = int(row[2]["value"])
+        titulo_solicitado = str(row[3].get("value", ""))
+        temporada_solicitada = str(row[4].get("value", "General"))
+        if normalizar_titulo(titulo_solicitado) != titulo_objetivo:
+            continue
+        if temporada_solicitada.strip().lower() != temporada_objetivo:
+            continue
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"🎉 ¡Tu contenido <b>{escape(titulo_base)}</b> ya ha sido agregado al catálogo!\n\nAbre el catálogo actualizado para encontrarlo.",
+                text=f"🎉 ¡Tu contenido <b>{escape(titulo_solicitado)}</b> ya ha sido agregado al catálogo!\\n\\nAbre el catálogo actualizado para encontrarlo.",
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
             await ejecutar_turso_sql([f"DELETE FROM solicitudes WHERE id = {solicitud_id}"])
+            logger.info(f"Notificación enviada por solicitud {solicitud_id} al usuario {user_id}.")
         except Exception as e:
-            logger.error(f"No se pudo avisar al usuario {user_id} por la solicitud {solicitud_id}: {e}")
+            logger.error(f"No se pudo avisar al usuario {user_id} por la solicitud {solicitud_id}: {e}", exc_info=True)
 
 
 async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
