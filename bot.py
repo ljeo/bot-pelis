@@ -222,36 +222,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
 
         keyboard = [
-            [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
-             InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")]
+            [InlineKeyboardButton("📂 Ver Catálogo Registrado", callback_data="catalogo_ver_todo")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if img_url and img_url != "None":
             await update.message.reply_photo(photo=img_url, caption=texto_final, parse_mode="Markdown", reply_markup=reply_markup)
         else:
-            await update.message.reply_text(texto_final, parse_mode="Markdown", reply_markup=reply_markup)
-
-async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    
-    try:
-        sql = "SELECT DISTINCT titulo FROM peliculas WHERE temporada = 'General' ORDER BY id DESC LIMIT 20"
-        resultado = await ejecutar_turso_sql([sql])
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
-
-        keyboard = []
-        if rows:
-            for row in rows:
-                titulo = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
-                if not titulo:
-                    continue
-                callback_data = f"seltemp_{titulo}_General"
-                if len(callback_data.encode('utf-8')) > 64:
+            await update.message.reply_text(texto_final, parse_mode="Markdown", reply_markup
