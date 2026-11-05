@@ -252,10 +252,10 @@ async def init_db() -> None:
             filas_episodios = res_episodios.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             actualizaciones_episodios = []
 
-            patron_titulo_duplicado = re.compile(r"^\\s*(.*?)\\s*\\(\\s*(.*?)\\s*\\)\\s*$")
+            patron_titulo_duplicado = re.compile(r"^\s*(.*?)\s*\(\s*(.*?)\s*\)\s*$")
             patron_marcador_episodio = re.compile(
-                r"^\\s+(?:\\d{1,2}[xX]\\d{1,2}|[sS]\\d{1,2}[eE]\\d{1,2}|"
-                r"(?:temporada|temp|cap(?:ítulo)?|episodio)\\s*\\d+)\\b",
+                r"^\s+(?:\d{1,2}[xX]\d{1,2}|[sS]\d{1,2}[eE]\d{1,2}|"
+                r"(?:temporada|temp|cap(?:ítulo)?|episodio)\s*\d+)\b",
                 re.IGNORECASE
             )
 
