@@ -1858,10 +1858,15 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(
-                f"🎉 **¡Buenas noticias!** Encontré contenido disponible para: *{texto_args}*\n\nSelecciona lo que deseas ver:",
+                f"🎉 **¡Buenas noticias!** La temporada solicitada ya está registrada: *{titulo_solicitado} - {temporada_solicitada}*\n\nPulsa el botón para abrir el catálogo:",
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
             )
+            if patron_serie:
+                try:
+                    await update.message.delete()
+                except Exception as e_delete:
+                    logger.warning(f"No se pudo borrar el comando /pedir de contenido ya registrado: {e_delete}")
         else:
             titulo_solicitado_sql = titulo_solicitado.replace("'", "''")
             temporada_sql = temporada_solicitada.replace("'", "''")
