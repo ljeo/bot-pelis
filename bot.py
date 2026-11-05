@@ -627,9 +627,9 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         titulo_limpio = normalizar_mayusculas_titulo(titulo_limpio)
-        raw_title_limpio = normalizar_mayusculas_titulo(raw_title)
-        # Conservar el identificador del capítulo, pero normalizar el texto del título.
-        titulo_guardar = f"{titulo_limpio} ({raw_title_limpio})" if raw_title.lower() != titulo_limpio.lower() else titulo_limpio
+        # Guardar el nombre tal como viene en el canal, normalizado, sin repetir
+        # el título base entre paréntesis (por ejemplo: "Euphoria 1x1").
+        titulo_guardar = normalizar_mayusculas_titulo(raw_title)
     else:
         temporada = "General"
         titulo_limpio = normalizar_mayusculas_titulo(limpiar_titulo_pelicula(caption))
