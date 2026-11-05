@@ -899,8 +899,6 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
                     
                     btn_text = f"🗑️ Borrar: {titulo_encontrado}"
                     callback_data = f"delpel_{peli_id}"
-                    if len(callback_data.encode('utf-8')) > 64:
-                        callback_data = callback_data[:63]
                     
                     keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
 
