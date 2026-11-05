@@ -800,7 +800,8 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
         sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_guardar_escaped}')"
         await ejecutar_turso_sql([sql_insert])
         try:
-            await notificar_solicitudes_resueltas(titulo_base, temp_guardar, context)
+            titulo_para_busqueda = re.sub(r"\s+\d{4}$", "", titulo_base).strip()
+            await notificar_solicitudes_resueltas(titulo_para_busqueda, temp_guardar, context)
         except Exception as e_notif:
             logger.error(f"Error notificando solicitudes resueltas: {e_notif}", exc_info=True)
 
