@@ -197,6 +197,42 @@ async def init_db() -> None:
     except Exception:
         pass
 
+    # Migración única: normalizar también los títulos que ya existían en la BD.
+    try:
+        res_migracion = await ejecutar_turso_sql([
+            "SELECT valor FROM config WHERE clave = 'migracion_titulos_mayuscula_inicial_v1'"
+        ])
+        filas_migracion = res_migracion.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        migracion_hecha = bool(filas_migracion and filas_migracion[0][0].get("value") == "ok")
+        if not migracion_hecha:
+            res_titulos = await ejecutar_turso_sql(["SELECT id, titulo FROM peliculas"])
+            filas_titulos = res_titulos.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            actualizaciones = []
+            for fila in filas_titulos:
+                if len(fila) < 2:
+                    continue
+                id_registro = fila[0].get("value")
+                titulo_actual = str(fila[1].get("value") or "")
+                titulo_nuevo = normalizar_mayusculas_titulo(titulo_actual)
+                if id_registro is not None and titulo_nuevo != titulo_actual:
+                    titulo_sql = titulo_nuevo.replace("'", "''")
+                    actualizaciones.append(
+                        f"UPDATE peliculas SET titulo = '{titulo_sql}' WHERE id = {int(id_registro)}"
+                    )
+
+            for inicio in range(0, len(actualizaciones), 50):
+                await ejecutar_turso_sql(actualizaciones[inicio:inicio + 50])
+
+            await ejecutar_turso_sql([
+                "INSERT OR REPLACE INTO config (clave, valor) "
+                "VALUES ('migracion_titulos_mayuscula_inicial_v1', 'ok')"
+            ])
+            logger.info(
+                f"Migración de títulos antiguos completada: {len(actualizaciones)} registros actualizados."
+            )
+    except Exception as e_migracion:
+        logger.error(f"No se pudo completar la migración de títulos antiguos: {e_migracion}", exc_info=True)
+
     logger.info("Base de datos y tablas verificadas correctamente.")
 
 async def es_admin(user_id: int) -> bool:
