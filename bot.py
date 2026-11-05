@@ -4,6 +4,7 @@ import logging
 import httpx
 import re
 import secrets
+import unicodedata
 from html import escape
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
@@ -441,6 +442,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             await update.message.reply_text(texto_final, parse_mode="Markdown", reply_markup=reply_markup)
 
+def limpiar_titulo_pelicula(caption: str) -> str:
+    """Extrae el título principal de la primera línea y elimina adornos/duplicados."""
+    lineas = [linea.strip() for linea in (caption or "").splitlines() if linea.strip()]
+    if not lineas:
+        return "Sin Título"
+
+    titulo = lineas[0]
+    # Si el canal publica el título en dos idiomas separados por '/', conservar
+    # el primero para evitar guardar el mismo nombre duplicado.
+    titulo = re.split(r"\\s+/\\s+", titulo, maxsplit=1)[0].strip()
+
+    # Quitar emojis y símbolos decorativos al inicio (⭐, 🎬, 📀, etc.).
+    while titulo:
+        caracter = titulo[0]
+        categoria = unicodedata.category(caracter)
+        if caracter.isspace() or categoria.startswith("S") or categoria.startswith("P") or caracter in ("\\ufe0f", "\\u200d"):
+            titulo = titulo[1:].lstrip()
+        else:
+            break
+
+    return titulo.strip() or "Sin Título"
+
+
 # INGESTA AUTOMÁTICA DESDE CANAL MEJORADA
 async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.channel_post
@@ -497,8 +521,8 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         titulo_guardar = f"{titulo_limpio} ({raw_title})" if raw_title.lower() != titulo_limpio.lower() else raw_title
     else:
         temporada = "General"
-        titulo_limpio = raw_title.strip()
-        titulo_guardar = raw_title
+        titulo_limpio = limpiar_titulo_pelicula(caption)
+        titulo_guardar = titulo_limpio
 
     try:
         sql_check_file = f"SELECT id FROM peliculas WHERE file_id = '{file_id}'"
@@ -574,7 +598,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         items_pagina = titulos_unicos[inicio:inicio + ITEMS_POR_PAGINA]
         keyboard = []
         for id_registro, titulo_clean in items_pagina:
-            keyboard.append([InlineKeyboardButton(f"🎬 {titulo_clean}", callback_data=f"seltemp_id_{id_registro}_General")])
+            keyboard.append([InlineKeyboardButton(titulo_clean, callback_data=f"seltemp_id_{id_registro}_General")])
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_peliculas_p_{pagina - 1}"))
