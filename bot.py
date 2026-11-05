@@ -361,9 +361,9 @@ async def enviar_aviso_permisos(chat_id: int, context: ContextTypes.DEFAULT_TYPE
             return
 
         texto = (
-            "👋 **¡Gracias por agregarme al grupo!**\\n\\n"
+            "👋 **¡Gracias por agregarme al grupo!**\n\n"
             "Para desbloquear mis funciones, agrégame como **administrador** "
-            "y activa el permiso **Eliminar mensajes**.\\n\\n"
+            "y activa el permiso **Eliminar mensajes**.\n\n"
             "Así podré gestionar mejor el grupo, borrar los comandos cuando corresponda "
             "y ofrecer todas las funciones disponibles. ¡Gracias! 🎬"
         )
