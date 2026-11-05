@@ -1569,6 +1569,13 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     await ejecutar_turso_sql([f"UPDATE solicitudes SET mensaje_id = {mensaje_peticion.message_id}, admin_mensaje_id = {admin_id_sql} WHERE id = {id_solicitud}"])
             except Exception as e_msg:
                 logger.error(f"No se pudo guardar el ID del aviso: {e_msg}", exc_info=True)
+
+            # Borrar el comando original del usuario después de registrar la petición.
+            # En grupos, Telegram requiere que el bot tenga permiso para borrar mensajes.
+            try:
+                await update.message.delete()
+            except Exception as e_delete:
+                logger.warning(f"No se pudo borrar el mensaje original de /pedir: {e_delete}")
     except Exception as e:
         logger.error(f"Error en comando /pedir: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu petición.")
