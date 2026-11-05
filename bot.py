@@ -1311,15 +1311,18 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 except Exception:
                     pass
                 msg_enviando = await context.bot.send_message(chat_id=chat_actual_id, text="🎬 Enviando...")
-                for row in rows:
-                    file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
-                    nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
-                    if file_id and file_id != "None":
-                        await context.bot.send_video(chat_id=chat_actual_id, video=file_id, caption=f"📁 {nombre_cap}")
                 try:
-                    await msg_enviando.delete()
-                except Exception:
-                    pass
+                    for row in rows:
+                        file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
+                        nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
+                        if file_id and file_id != "None":
+                            await context.bot.send_video(chat_id=chat_actual_id, video=file_id, caption=f"📁 {nombre_cap}")
+                finally:
+                    # El aviso se retira siempre al terminar el envío, incluso si falla algún capítulo.
+                    try:
+                        await msg_enviando.delete()
+                    except Exception as e_delete:
+                        logger.warning(f"No se pudo borrar el mensaje de envío: {e_delete}")
         else:
             await editar_o_enviar(query, "⚠️ Archivos no encontrados.")
     except Exception as e:
