@@ -563,6 +563,14 @@ def limpiar_titulo_pelicula(caption: str) -> str:
     # el primero para evitar guardar el mismo nombre duplicado.
     titulo = re.split(r"\s+/\s+", titulo, maxsplit=1)[0].strip()
 
+    # En películas, conservar el año pero quitar paréntesis/corchetes y
+    # separadores decorativos: "TOW (2026)" -> "TOW 2026".
+    titulo = re.sub(
+        r"\s*[-–—:]*\s*[\(\[\{]\s*((?:19|20)\d{2})\s*[\)\]\}]\s*$",
+        r" \1",
+        titulo
+    ).strip()
+
     # Quitar emojis y símbolos decorativos al inicio (⭐, 🎬, 📀, etc.).
     while titulo:
         caracter = titulo[0]
