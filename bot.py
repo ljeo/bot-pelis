@@ -851,133 +851,206 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
 
     query_texto = " ".join(context.args).strip()
     if not query_texto:
-        await update.message.reply_text("⚠️ Indica el nombre de la película, serie o anime que deseas eliminar.\nEjemplo: `/eliminar Naruto` o `/eliminar Batman`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "⚠️ Indica el nombre de la película o serie que deseas eliminar.\n"
+            "Ejemplo: `/eliminar Naruto` o `/eliminar Batman`",
+            parse_mode="Markdown"
+        )
         return
 
     try:
+        # LOWER() en ambos lados hace que la búsqueda no distinga mayúsculas/minúsculas.
         query_escaped = query_texto.replace("'", "''").lower()
-        sql = f"SELECT id, titulo, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
+        sql = (
+            "SELECT id, titulo, temporada FROM peliculas "
+            f"WHERE LOWER(titulo) LIKE '%{query_escaped}%' ORDER BY id ASC"
+        )
         resultado = await ejecutar_turso_sql([sql])
-        
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
+        results_list = resultado.get("results", [])
+        rows = results_list[0].get("response", {}).get("result", {}).get("rows", []) if results_list else []
 
-        if rows:
-            cant_archivos = len(rows)
-            # Limpiamos el nombre base para mostrarlo claramente
-            nombre_base = rows[0][1]["value"].split(" (")[0].strip() if len(rows[0]) > 1 and "value" in rows[0][1] else query_texto
-            nombre_base = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b)', '', nombre_base, flags=re.IGNORECASE).strip() or query_texto
-
-            delete_token = secrets.token_hex(4)
-            delete_queries = context.user_data.setdefault("delete_queries", {})
-            delete_queries[delete_token] = query_texto
-            # Evitamos que el almacenamiento temporal crezca indefinidamente.
-            while len(delete_queries) > 20:
-                delete_queries.pop(next(iter(delete_queries)))
-
-            keyboard = [
-                [InlineKeyboardButton(f"🚨 BORRAR TODO ({cant_archivos} capítulos/archivos)", callback_data=f"delall_{delete_token}")],
-                [InlineKeyboardButton("📋 Ver/Eliminar capitulo individual", callback_data=f"delind_{delete_token}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+        if not rows:
             await update.message.reply_text(
-                f"🗑️ **Opciones de eliminación para:** *{nombre_base}*\n\n"
-                f"📦 Se encontraron `{cant_archivos}` archivo(s) asociados en la base de datos.\n"
-                f"¿Deseas eliminar todo de un solo clic o ver la lista individual?",
-                reply_markup=reply_markup,
-                parse_mode="Markdown"
+                f"🔍 No encontré ningún contenido registrado con el nombre '{query_texto}'."
             )
-        else:
-            await update.message.reply_text(f"🔍 No encontré ningún contenido registrado con el nombre '{query_texto}'.")
+            return
+
+        peliculas = [r for r in rows if len(r) > 2 and str(r[2].get("value", "General")) == "General"]
+        episodios = [r for r in rows if len(r) > 2 and str(r[2].get("value", "General")) != "General"]
+
+        token = secrets.token_hex(4)
+        context.user_data.setdefault("delete_queries", {})[token] = query_texto
+        while len(context.user_data["delete_queries"]) > 20:
+            context.user_data["delete_queries"].pop(next(iter(context.user_data["delete_queries"])))
+
+        keyboard = []
+        if peliculas:
+            keyboard.append([InlineKeyboardButton(
+                f"🎬 Eliminar película ({len(peliculas)} archivo(s))",
+                callback_data=f"delmovie_{token}"
+            )])
+        if episodios:
+            keyboard.append([InlineKeyboardButton(
+                f"📺 Eliminar serie completa ({len(episodios)} capítulos)",
+                callback_data=f"delseries_{token}"
+            )])
+            keyboard.append([InlineKeyboardButton(
+                "📂 Elegir temporada para eliminar",
+                callback_data=f"delseasons_{token}"
+            )])
+            keyboard.append([InlineKeyboardButton(
+                "🗑️ Eliminar un capítulo",
+                callback_data=f"delind_{token}"
+            )])
+
+        nombre_base = str(rows[0][1].get("value", query_texto)).split(" (")[0].strip()
+        await update.message.reply_text(
+            f"🗑️ Opciones de eliminación para: *{nombre_base}*\n\n"
+            "Elige exactamente qué deseas borrar:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
     except Exception as e:
         logger.error(f"Error al buscar contenido para eliminar: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
 
+
 async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    data = query.data or ""
 
-    data = query.data
+    delete_queries = context.user_data.get("delete_queries", {})
+    delete_seasons = context.user_data.setdefault("delete_seasons", {})
 
-    # 1. BORRAR TODO DE UN SOLO CLIC
-    if data.startswith("delall_"):
-        delete_key = data[len("delall_"):].strip()
-        query_texto = context.user_data.get("delete_queries", {}).get(delete_key, delete_key)
-        query_escaped = query_texto.replace("'", "''").lower()
-
+    # Borrar únicamente una película (temporada General).
+    if data.startswith("delmovie_"):
+        token = data[len("delmovie_"):]
+        query_texto = delete_queries.get(token)
+        if not query_texto:
+            await editar_o_enviar(query, "⚠️ La búsqueda expiró. Ejecuta /eliminar nuevamente.")
+            return
+        q = query_texto.replace("'", "''").lower()
         try:
-            # Primero contamos cuántos había
-            sql_count = f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
-            res_c = await ejecutar_turso_sql([sql_count])
-            count = 0
-            try:
-                rows_c = res_c.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-                if rows_c and "value" in rows_c[0][0]:
-                    count = int(rows_c[0][0]["value"])
-            except Exception:
-                pass
-
-            # Ejecutamos borrado masivo
-            sql_del = f"DELETE FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
-            await ejecutar_turso_sql([sql_del])
-            await editar_o_enviar(query, f"✅ ¡Se eliminó exitosamente la serie/película completa!\n🗑️ **Total borrados:** `{count}` registros.", parse_mode="Markdown")
+            res = await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada = 'General'"])
+            rows = res.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            count = int(rows[0][0].get("value", 0)) if rows else 0
+            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada = 'General'"])
+            await editar_o_enviar(query, f"✅ Película eliminada.\n🗑️ Archivos borrados: {count}", parse_mode="Markdown")
         except Exception as e:
-            logger.error(f"Error al eliminar masivo: {e}", exc_info=True)
-            await editar_o_enviar(query, "❌ Ocurrió un error al intentar eliminar el contenido.")
+            logger.error(f"Error eliminando película: {e}", exc_info=True)
+            await editar_o_enviar(query, "❌ No se pudo eliminar la película.")
         return
 
-    # 2. MOSTRAR LISTA DE CAPÍTULOS INDIVIDUALES
-    if data.startswith("delind_"):
-        delete_key = data[len("delind_"):].strip()
-        query_texto = context.user_data.get("delete_queries", {}).get(delete_key, delete_key)
-        query_escaped = query_texto.replace("'", "''").lower()
-
+    # Borrar todos los capítulos de la serie, sin tocar películas homónimas.
+    if data.startswith("delseries_"):
+        token = data[len("delseries_"):]
+        query_texto = delete_queries.get(token)
+        if not query_texto:
+            await editar_o_enviar(query, "⚠️ La búsqueda expiró. Ejecuta /eliminar nuevamente.")
+            return
+        q = query_texto.replace("'", "''").lower()
         try:
-            sql = f"SELECT id, titulo, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 20"
-            resultado = await ejecutar_turso_sql([sql])
-            rows = []
-            try:
-                results_list = resultado.get("results", [])
-                if results_list and "response" in results_list[0]:
-                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
-            except Exception:
-                pass
+            res = await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada != 'General'"])
+            rows = res.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            count = int(rows[0][0].get("value", 0)) if rows else 0
+            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada != 'General'"])
+            await editar_o_enviar(query, f"✅ Serie eliminada por completo.\n🗑️ Capítulos borrados: {count}", parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error eliminando serie: {e}", exc_info=True)
+            await editar_o_enviar(query, "❌ No se pudo eliminar la serie.")
+        return
 
-            if rows:
-                keyboard = []
-                for row in rows:
-                    peli_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else ""
-                    titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else ""
-                    
-                    btn_text = f"🗑️ Borrar: {titulo_encontrado}"
-                    callback_data = f"delpel_{peli_id}"
-                    
-                    keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
+    # Mostrar temporadas disponibles de esa serie.
+    if data.startswith("delseasons_"):
+        token = data[len("delseasons_"):]
+        query_texto = delete_queries.get(token)
+        if not query_texto:
+            await editar_o_enviar(query, "⚠️ La búsqueda expiró. Ejecuta /eliminar nuevamente.")
+            return
+        q = query_texto.replace("'", "''").lower()
+        try:
+            res = await ejecutar_turso_sql([f"SELECT DISTINCT temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada != 'General' ORDER BY temporada"])
+            rows = res.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            keyboard = []
+            for row in rows:
+                temporada = str(row[0].get("value", ""))
+                if not temporada:
+                    continue
+                season_token = secrets.token_hex(4)
+                delete_seasons[season_token] = {"query": query_texto, "temporada": temporada}
+                keyboard.append([InlineKeyboardButton(
+                    f"🗑️ Eliminar {temporada}",
+                    callback_data=f"delseason_{season_token}"
+                )])
+            if keyboard:
+                await editar_o_enviar(query, "📂 Selecciona la temporada que deseas eliminar:", reply_markup=InlineKeyboardMarkup(keyboard))
+            else:
+                await editar_o_enviar(query, "⚠️ No se encontraron temporadas.")
+        except Exception as e:
+            logger.error(f"Error mostrando temporadas: {e}", exc_info=True)
+            await editar_o_enviar(query, "❌ No se pudieron cargar las temporadas.")
+        return
 
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await editar_o_enviar(query, "🗑️ **Selecciona el capítulo específico a eliminar:**", reply_markup=reply_markup, parse_mode="Markdown")
+    # Borrar una temporada específica.
+    if data.startswith("delseason_"):
+        season_token = data[len("delseason_"):]
+        selection = delete_seasons.get(season_token)
+        if not selection:
+            await editar_o_enviar(query, "⚠️ La selección expiró. Ejecuta /eliminar nuevamente.")
+            return
+        q = selection["query"].replace("'", "''").lower()
+        temporada = selection["temporada"].replace("'", "''")
+        try:
+            res = await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada = '{temporada}'"])
+            rows = res.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            count = int(rows[0][0].get("value", 0)) if rows else 0
+            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada = '{temporada}'"])
+            await editar_o_enviar(query, f"✅ {selection['temporada']} eliminada.\n🗑️ Capítulos borrados: {count}", parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error eliminando temporada: {e}", exc_info=True)
+            await editar_o_enviar(query, "❌ No se pudo eliminar la temporada.")
+        return
+
+    # Mostrar capítulos individuales, solo de series.
+    if data.startswith("delind_"):
+        token = data[len("delind_"):]
+        query_texto = delete_queries.get(token)
+        if not query_texto:
+            await editar_o_enviar(query, "⚠️ La búsqueda expiró. Ejecuta /eliminar nuevamente.")
+            return
+        q = query_texto.replace("'", "''").lower()
+        try:
+            res = await ejecutar_turso_sql([f"SELECT id, titulo, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada != 'General' ORDER BY temporada, id LIMIT 50"])
+            rows = res.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            keyboard = []
+            for row in rows:
+                peli_id = str(row[0].get("value", ""))
+                titulo = str(row[1].get("value", ""))
+                temporada = str(row[2].get("value", ""))
+                if peli_id:
+                    keyboard.append([InlineKeyboardButton(
+                        f"🗑️ {temporada}: {titulo}",
+                        callback_data=f"delpel_{peli_id}"
+                    )])
+            if keyboard:
+                await editar_o_enviar(query, "🗑️ Selecciona el capítulo específico que deseas eliminar:", reply_markup=InlineKeyboardMarkup(keyboard))
             else:
                 await editar_o_enviar(query, "⚠️ No se encontraron capítulos.")
         except Exception as e:
-            logger.error(f"Error al obtener capitulos individuales: {e}", exc_info=True)
+            logger.error(f"Error al obtener capítulos individuales: {e}", exc_info=True)
             await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
         return
 
-    # 3. BORRAR UN SOLO CAPÍTULO INDIVIDUAL POR ID
+    # Borrar un solo capítulo por su ID.
     if data.startswith("delpel_"):
-        peli_id = data.replace("delpel_", "")
+        peli_id = data[len("delpel_"):]
         try:
-            sql = f"DELETE FROM peliculas WHERE id = '{peli_id}'"
-            await ejecutar_turso_sql([sql])
-            await editar_o_enviar(query, "✅ ¡Capítulo/archivo eliminado de la base de datos exitosamente!")
+            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id = {int(peli_id)} AND temporada != 'General'"])
+            await editar_o_enviar(query, "✅ ¡Capítulo eliminado de la base de datos!")
         except Exception as e:
-            logger.error(f"Error eliminando archivo: {e}")
-            await editar_o_enviar(query, "❌ Ocurrió un error al intentar eliminar el contenido.")
+            logger.error(f"Error eliminando capítulo: {e}", exc_info=True)
+            await editar_o_enviar(query, "❌ Ocurrió un error al intentar eliminar el capítulo.")
         return
 
 async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1444,7 +1517,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
     application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
     application.add_handler(CallbackQueryHandler(boton_ver_episodio, pattern="^(send_chat_|send_priv_)"))
-    application.add_handler(CallbackQueryHandler(boton_eliminar_pelicula, pattern="^(delpel_|delall_|delind_)"))
+    application.add_handler(CallbackQueryHandler(boton_eliminar_pelicula, pattern="^(delmovie_|delseries_|delseasons_|delseason_|delpel_|delind_)"))
     
     application.add_error_handler(error_handler)
 
