@@ -244,11 +244,11 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
                 mensaje_id = int(filas_aviso[0][0]["value"])
                 try:
                     await context.bot.delete_message(chat_id=cambio.chat.id, message_id=mensaje_id)
+                    await ejecutar_turso_sql([
+                        f"DELETE FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
+                    ])
                 except Exception as e_delete:
                     logger.warning(f"No se pudo borrar el aviso de permisos en {cambio.chat.id}: {e_delete}")
-                await ejecutar_turso_sql([
-                    f"DELETE FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
-                ])
         except Exception as e_aviso:
             logger.error(f"Error limpiando el aviso de permisos en {cambio.chat.id}: {e_aviso}", exc_info=True)
         return
