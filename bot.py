@@ -37,7 +37,6 @@ TEXTO_BIENVENIDA_DEFAULT = (
     "¡Disfruta del entretenimiento! 🚀"
 )
 
-# Servidor HTTP para Render y UptimeRobot (evita el error 502)
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -397,3 +396,5 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
             count = 0
             try:
                 results_list = res_count.get("results", [])
+                if results_list and "response" in results_list[0]:
+                    rows = results_list[0]["response
