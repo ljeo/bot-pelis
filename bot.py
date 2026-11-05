@@ -2,6 +2,7 @@ import os
 import logging
 import httpx
 import re
+import secrets
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
@@ -825,9 +826,16 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
             nombre_base = rows[0][1]["value"].split(" (")[0].strip() if len(rows[0]) > 1 and "value" in rows[0][1] else query_texto
             nombre_base = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b)', '', nombre_base, flags=re.IGNORECASE).strip() or query_texto
 
+            delete_token = secrets.token_hex(4)
+            delete_queries = context.user_data.setdefault("delete_queries", {})
+            delete_queries[delete_token] = query_texto
+            # Evitamos que el almacenamiento temporal crezca indefinidamente.
+            while len(delete_queries) > 20:
+                delete_queries.pop(next(iter(delete_queries)))
+
             keyboard = [
-                [InlineKeyboardButton(f"🚨 BORRAR TODO ({cant_archivos} capítulos/archivos)", callback_data=f"delall_{query_texto}")],
-                [InlineKeyboardButton("📋 Ver/Eliminar capitulo individual", callback_data=f"delind_{query_texto}")]
+                [InlineKeyboardButton(f"🚨 BORRAR TODO ({cant_archivos} capítulos/archivos)", callback_data=f"delall_{delete_token}")],
+                [InlineKeyboardButton("📋 Ver/Eliminar capitulo individual", callback_data=f"delind_{delete_token}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(
@@ -851,7 +859,8 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
 
     # 1. BORRAR TODO DE UN SOLO CLIC
     if data.startswith("delall_"):
-        query_texto = data.replace("delall_", "").strip()
+        delete_key = data[len("delall_"):].strip()
+        query_texto = context.user_data.get("delete_queries", {}).get(delete_key, delete_key)
         query_escaped = query_texto.replace("'", "''").lower()
 
         try:
@@ -877,7 +886,8 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
 
     # 2. MOSTRAR LISTA DE CAPÍTULOS INDIVIDUALES
     if data.startswith("delind_"):
-        query_texto = data.replace("delind_", "").strip()
+        delete_key = data[len("delind_"):].strip()
+        query_texto = context.user_data.get("delete_queries", {}).get(delete_key, delete_key)
         query_escaped = query_texto.replace("'", "''").lower()
 
         try:
