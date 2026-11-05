@@ -451,13 +451,13 @@ def limpiar_titulo_pelicula(caption: str) -> str:
     titulo = lineas[0]
     # Si el canal publica el título en dos idiomas separados por '/', conservar
     # el primero para evitar guardar el mismo nombre duplicado.
-    titulo = re.split(r"\\s+/\\s+", titulo, maxsplit=1)[0].strip()
+    titulo = re.split(r"\s+/\s+", titulo, maxsplit=1)[0].strip()
 
     # Quitar emojis y símbolos decorativos al inicio (⭐, 🎬, 📀, etc.).
     while titulo:
         caracter = titulo[0]
         categoria = unicodedata.category(caracter)
-        if caracter.isspace() or categoria.startswith("S") or categoria.startswith("P") or caracter in ("\\ufe0f", "\\u200d"):
+        if caracter.isspace() or categoria.startswith("S") or categoria.startswith("P") or caracter in ("\ufe0f", "\u200d"):
             titulo = titulo[1:].lstrip()
         else:
             break
