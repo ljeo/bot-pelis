@@ -1452,7 +1452,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     try:
-        patron_busqueda_serie = re.match(r"^(.*?)\\s+(?:temporada|temp)\\s*(\\d+)\\s*$", query_texto, re.IGNORECASE)
+        patron_busqueda_serie = re.match(r"^(.*?)\s+(?:temporada|temp)\s*(\d+)\s*$", query_texto, re.IGNORECASE)
         titulo_consulta = patron_busqueda_serie.group(1).strip() if patron_busqueda_serie else query_texto
         temporada_filtro = f"Temporada {int(patron_busqueda_serie.group(2))}" if patron_busqueda_serie else None
         query_escaped = titulo_consulta.replace("'", "''").lower()
@@ -1809,7 +1809,7 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         titulo_solicitado = patron_pelicula.group(1).strip() if patron_pelicula else patron_serie.group(1).strip()
         temporada_solicitada = "General"
         if patron_serie:
-            temporada_num = re.search(r"\\d+", patron_serie.group(2)).group(0)
+            temporada_num = re.search(r"\d+", patron_serie.group(2)).group(0)
             temporada_solicitada = f"Temporada {int(temporada_num)}"
 
         titulo_sql = titulo_solicitado.replace("'", "''").lower()
