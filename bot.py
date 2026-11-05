@@ -37,7 +37,7 @@ TEXTO_BIENVENIDA_DEFAULT = (
     "¡Disfruta del entretenimiento! 🚀"
 )
 
-# Servidor HTTP para que UptimeRobot mantenga el servicio web activo 24/7
+# Servidor HTTP para Render y UptimeRobot (evita el error 502)
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -48,8 +48,11 @@ class DummyHandler(BaseHTTPRequestHandler):
 
 def start_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), DummyHandler)
-    server.serve_forever()
+    try:
+        server = HTTPServer(("0.0.0.0", port), DummyHandler)
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"Error al iniciar el servidor HTTP: {e}")
 
 def get_turso_rest_url() -> str:
     url = TURSO_DATABASE_URL.strip()
@@ -394,47 +397,3 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
             count = 0
             try:
                 results_list = res_count.get("results", [])
-                if results_list and "response" in results_list[0]:
-                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
-                    if rows and "value" in rows[0][0]:
-                        count = int(rows[0][0]["value"])
-            except Exception:
-                count = 0
-
-            siguiente_cap = count + 1
-            titulo_final = f"{titulo_base} ({num_temp}x{siguiente_cap})"
-            temp_guardar = temporada
-
-        titulo_final_escaped = titulo_final.replace("'", "''")
-        temp_guardar_escaped = temp_guardar.replace("'", "''")
-        
-        sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_guardar_escaped}')"
-        await ejecutar_turso_sql([sql_insert])
-        
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-        await query.message.reply_text(f"✅ ¡Guardado exitosamente!\n📁 *{titulo_final}*", parse_mode="Markdown")
-    except Exception as e:
-        logger.error(f"Error al guardar episodio: {e}", exc_info=True)
-        try:
-            await query.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
-        except Exception:
-            pass
-
-async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
-        return
-    user_id = update.effective_user.id
-    if not await es_admin(user_id):
-        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
-        return
-
-    query_texto = " ".join(context.args).strip()
-    if not query_texto:
-        await update.message.reply_text("⚠️ Indica el nombre de la película, serie o anime que deseas eliminar.\nEjemplo: `/eliminar Naruto`", parse_mode="Markdown")
-        return
-
-    try:
-        query_escaped = query_texto
