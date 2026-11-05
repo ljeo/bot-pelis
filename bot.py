@@ -3,6 +3,7 @@ import logging
 import httpx
 import re
 import secrets
+from html import escape
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
@@ -156,7 +157,17 @@ async def init_db() -> None:
             valor TEXT
         )
     """
-    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config])
+    sql_solicitudes = """
+        CREATE TABLE IF NOT EXISTS solicitudes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            titulo TEXT NOT NULL,
+            temporada TEXT DEFAULT 'General',
+            creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes])
 
     try:
         await ejecutar_turso_sql([f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{SUPER_ADMIN_ID}')"])
@@ -788,11 +799,46 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
 
         sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_guardar_escaped}')"
         await ejecutar_turso_sql([sql_insert])
-        
+        try:
+            await notificar_solicitudes_resueltas(titulo_base, temp_guardar, context)
+        except Exception as e_notif:
+            logger.error(f"Error notificando solicitudes resueltas: {e_notif}", exc_info=True)
+
         await editar_o_enviar(query, f"✅ ¡Guardado exitosamente!\n📁 *{titulo_final}*", parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error al guardar episodio: {e}", exc_info=True)
         await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
+
+async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: str, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Avisa en el chat original a quienes pidieron el contenido recién guardado."""
+    titulo_escaped = titulo_base.replace("'", "''").lower()
+    temporada_escaped = temporada_guardada.replace("'", "''")
+    sql = (
+        "SELECT id, chat_id, user_id FROM solicitudes "
+        f"WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = '{temporada_escaped}'"
+    )
+    resultado = await ejecutar_turso_sql([sql])
+    results = resultado.get("results", [])
+    rows = results[0].get("response", {}).get("result", {}).get("rows", []) if results else []
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎬 Ver catálogo de películas", callback_data="cat_peliculas"),
+        InlineKeyboardButton("📺 Ver catálogo de series", callback_data="cat_series")
+    ]])
+    for row in rows:
+        solicitud_id = int(row[0]["value"])
+        chat_id = int(row[1]["value"])
+        user_id = int(row[2]["value"])
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"🎉 ¡Tu contenido <b>{escape(titulo_base)}</b> ya ha sido agregado al catálogo!\n\nAbre el catálogo actualizado para encontrarlo.",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+            await ejecutar_turso_sql([f"DELETE FROM solicitudes WHERE id = {solicitud_id}"])
+        except Exception as e:
+            logger.error(f"No se pudo avisar al usuario {user_id} por la solicitud {solicitud_id}: {e}")
+
 
 async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
@@ -1263,6 +1309,11 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         query_escaped = texto_args.replace("'", "''").lower()
+        titulo_solicitado = patron_pelicula.group(1).strip() if patron_pelicula else patron_serie.group(1).strip()
+        temporada_solicitada = "General"
+        if patron_serie:
+            temporada_num = re.search(r"\d+", patron_serie.group(2)).group(0)
+            temporada_solicitada = f"Temporada {temporada_num}"
         
         # Buscamos en la base de datos si existe el contenido
         sql = f"SELECT id, temporada, titulo, file_id FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 10"
@@ -1309,6 +1360,12 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 parse_mode="Markdown"
             )
         else:
+            titulo_solicitado_sql = titulo_solicitado.replace("'", "''")
+            temporada_sql = temporada_solicitada.replace("'", "''")
+            sql_solicitud = ("INSERT INTO solicitudes (chat_id, user_id, titulo, temporada) "
+                f"VALUES ('{update.effective_chat.id}', '{user.id}', '{titulo_solicitado_sql}', '{temporada_sql}')")
+            await ejecutar_turso_sql([sql_solicitud])
+
             # Si cumple el formato y NO está en la BD, se notifica al Administrador Principal
             try:
                 msg_admin = (
