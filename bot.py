@@ -878,7 +878,7 @@ async def mostrar_temporadas_serie(update: Update, context: ContextTypes.DEFAULT
             # Al seleccionar una serie desde un registro de episodio, quitar el marcador
             # (1x01, S01E01, etc.) para recuperar el nombre base de la serie.
             nombre_serie = re.sub(
-                r"\\s*(?:\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[Ss]\\d{1,2}[Ee]\\d{1,2}\\b)\\s*$",
+                r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)\s*$",
                 "",
                 nombre_serie,
             ).strip()
