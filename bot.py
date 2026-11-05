@@ -425,12 +425,14 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     if estado == "administrator":
-        if puede_borrar:
-            await eliminar_aviso_permisos(cambio.chat.id, context)
-        else:
+        # Al ser administrador, intenta retirar el aviso anterior aunque Telegram
+        # no incluya can_delete_messages en este update. El helper conserva el
+        # registro si Telegram realmente rechaza el borrado.
+        await eliminar_aviso_permisos(cambio.chat.id, context)
+        if not puede_borrar:
             logger.info(
                 f"El bot ya es administrador en {cambio.chat.id}, "
-                "pero aún no tiene permiso para eliminar mensajes."
+                "pero aún no tiene permiso para eliminar mensajes de otros usuarios."
             )
         return
 
