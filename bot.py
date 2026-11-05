@@ -233,6 +233,79 @@ async def init_db() -> None:
     except Exception as e_migracion:
         logger.error(f"No se pudo completar la migración de títulos antiguos: {e_migracion}", exc_info=True)
 
+    # Migración única: quitar el título repetido en episodios antiguos de series/animes.
+    # Solo modifica el patrón inequívoco "Serie (serie 1x01)" y equivalentes;
+    # no toca títulos de películas ni paréntesis que no contengan el mismo nombre + episodio.
+    try:
+        res_migracion_episodios = await ejecutar_turso_sql([
+            "SELECT valor FROM config WHERE clave = 'migracion_titulos_episodios_sin_duplicar_v1'"
+        ])
+        filas_migracion_episodios = res_migracion_episodios.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        migracion_episodios_hecha = bool(
+            filas_migracion_episodios
+            and filas_migracion_episodios[0][0].get("value") == "ok"
+        )
+        if not migracion_episodios_hecha:
+            res_episodios = await ejecutar_turso_sql([
+                "SELECT id, titulo FROM peliculas WHERE temporada != 'General' OR temporada IS NULL"
+            ])
+            filas_episodios = res_episodios.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            actualizaciones_episodios = []
+
+            patron_titulo_duplicado = re.compile(r"^\\s*(.*?)\\s*\\(\\s*(.*?)\\s*\\)\\s*$")
+            patron_marcador_episodio = re.compile(
+                r"^\\s+(?:\\d{1,2}[xX]\\d{1,2}|[sS]\\d{1,2}[eE]\\d{1,2}|"
+                r"(?:temporada|temp|cap(?:ítulo)?|episodio)\\s*\\d+)\\b",
+                re.IGNORECASE
+            )
+
+            for fila in filas_episodios:
+                if len(fila) < 2:
+                    continue
+                id_registro = fila[0].get("value")
+                titulo_actual = str(fila[1].get("value") or "")
+                coincidencia = patron_titulo_duplicado.match(titulo_actual)
+                if not coincidencia or id_registro is None:
+                    continue
+
+                titulo_base = coincidencia.group(1).strip()
+                titulo_interior = coincidencia.group(2).strip()
+                if not titulo_base or not titulo_interior:
+                    continue
+
+                # El texto dentro del paréntesis debe comenzar con el mismo título
+                # y continuar inmediatamente con un marcador reconocible de episodio.
+                if not titulo_interior.casefold().startswith(titulo_base.casefold()):
+                    continue
+                resto = titulo_interior[len(titulo_base):]
+                if not patron_marcador_episodio.match(resto):
+                    continue
+
+                titulo_nuevo = normalizar_mayusculas_titulo(titulo_interior)
+                if titulo_nuevo != titulo_actual:
+                    titulo_sql = titulo_nuevo.replace("'", "''")
+                    actualizaciones_episodios.append(
+                        f"UPDATE peliculas SET titulo = '{titulo_sql}' WHERE id = {int(id_registro)}"
+                    )
+
+            for inicio in range(0, len(actualizaciones_episodios), 50):
+                await ejecutar_turso_sql(actualizaciones_episodios[inicio:inicio + 50])
+
+            await ejecutar_turso_sql([
+                "INSERT OR REPLACE INTO config (clave, valor) "
+                "VALUES ('migracion_titulos_episodios_sin_duplicar_v1', 'ok')"
+            ])
+            logger.info(
+                f"Migración de títulos duplicados de episodios completada: "
+                f"{len(actualizaciones_episodios)} registros actualizados."
+            )
+    except Exception as e_migracion_episodios:
+        logger.error(
+            f"No se pudo completar la migración de títulos duplicados de episodios: "
+            f"{e_migracion_episodios}",
+            exc_info=True
+        )
+
     logger.info("Base de datos y tablas verificadas correctamente.")
 
 async def es_admin(user_id: int) -> bool:
