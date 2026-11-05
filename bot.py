@@ -537,7 +537,7 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
         await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
 
 async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
+    if not update.message: or not update.message.from_user:
         return
     user_id = update.effective_user.id
     if not await es_admin(user_id):
