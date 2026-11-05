@@ -298,6 +298,7 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         titulo_guardar = f"{titulo_limpio} ({raw_title})" if raw_title.lower() != titulo_limpio.lower() else raw_title
     else:
         temporada = "General"
+        titulo_limpio = raw_title.strip()
         titulo_guardar = raw_title
 
     try:
