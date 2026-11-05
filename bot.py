@@ -175,7 +175,13 @@ async def init_db() -> None:
             message_id INTEGER NOT NULL
         )
     """
-    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes, sql_avisos_permisos])
+    sql_bienvenidas_grupos = """
+        CREATE TABLE IF NOT EXISTS bienvenidas_grupos (
+            chat_id TEXT PRIMARY KEY,
+            message_id INTEGER NOT NULL
+        )
+    """
+    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes, sql_avisos_permisos, sql_bienvenidas_grupos])
     try:
         await ejecutar_turso_sql(["ALTER TABLE solicitudes ADD COLUMN mensaje_id INTEGER"])
     except Exception as e:
@@ -220,14 +226,97 @@ async def obtener_idioma_usuario(user_id: int) -> str:
         pass
     return "es"
 
+async def enviar_bienvenida_grupo(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Envía y fija una sola vez por grupo la bienvenida configurada para /start."""
+    chat_id_sql = str(chat_id)
+    try:
+        resultado = await ejecutar_turso_sql([
+            f"SELECT message_id FROM bienvenidas_grupos WHERE chat_id = '{chat_id_sql}'"
+        ])
+        filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if filas:
+            logger.info(f"La bienvenida del grupo {chat_id} ya fue enviada anteriormente.")
+            return
+
+        texto_final = TEXTO_BIENVENIDA_DEFAULT
+        img_url = None
+        try:
+            res_txt = await ejecutar_turso_sql([
+                "SELECT valor FROM config WHERE clave = 'bienvenida_texto'"
+            ])
+            filas_txt = res_txt.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if filas_txt and filas_txt[0][0].get("value"):
+                texto_final = str(filas_txt[0][0]["value"])
+        except Exception as e:
+            logger.warning(f"No se pudo leer el texto de bienvenida configurado: {e}")
+
+        try:
+            res_img = await ejecutar_turso_sql([
+                "SELECT valor FROM config WHERE clave = 'bienvenida_img'"
+            ])
+            filas_img = res_img.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if filas_img and filas_img[0][0].get("value"):
+                img_url = str(filas_img[0][0]["value"])
+        except Exception as e:
+            logger.warning(f"No se pudo leer la imagen de bienvenida configurada: {e}")
+
+        keyboard = [[
+            InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
+            InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")
+        ]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if img_url and img_url != "None":
+            mensaje = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=img_url,
+                caption=texto_final,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
+            )
+        else:
+            mensaje = await context.bot.send_message(
+                chat_id=chat_id,
+                text=texto_final,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
+            )
+
+        # Registrar tras enviar para evitar duplicados en futuros cambios de permisos.
+        await ejecutar_turso_sql([
+            "INSERT OR IGNORE INTO bienvenidas_grupos (chat_id, message_id) "
+            f"VALUES ('{chat_id_sql}', {mensaje.message_id})"
+        ])
+
+        try:
+            await context.bot.pin_chat_message(
+                chat_id=chat_id,
+                message_id=mensaje.message_id,
+                disable_notification=True
+            )
+        except Exception as e_pin:
+            logger.warning(
+                f"La bienvenida se envió al grupo {chat_id}, pero no se pudo fijar: {e_pin}"
+            )
+    except Exception as e:
+        logger.error(f"No se pudo enviar la bienvenida automática al grupo {chat_id}: {e}", exc_info=True)
+
+
 async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Avisa al grupo si el bot no tiene permisos para borrar mensajes."""
     cambio = update.my_chat_member
     if not cambio or cambio.chat.type not in ("group", "supergroup"):
         return
 
+    estado_anterior = cambio.old_chat_member.status
     nuevo_estado = cambio.new_chat_member
     estado = nuevo_estado.status
+
+    # La bienvenida se dispara solo al pasar a administrador, no por cada
+    # actualización posterior de permisos. La tabla evita repetirla por grupo.
+    if estado == "administrator" and estado_anterior != "administrator":
+        await enviar_bienvenida_grupo(cambio.chat.id, context)
+
     puede_borrar = estado == "administrator" and bool(
         getattr(nuevo_estado, "can_delete_messages", False)
     )
