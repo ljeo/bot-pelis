@@ -346,12 +346,11 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     texto = (
-        "⚠️ **¡Necesito permisos de administrador!**\n\n"
-        "Para funcionar correctamente en este grupo y poder borrar los comandos "
-        "de petición después de registrarlos, el dueño del grupo debe añadirme "
-        "como **administrador** y activar el permiso **Eliminar mensajes**.\n\n"
-        "Después de concederme ese permiso, podré completar esa función. "
-        "Las demás funciones disponibles seguirán dependiendo de sus permisos."
+        "👋 **¡Gracias por agregarme al grupo!**\n\n"
+        "Para desbloquear mis funciones, agrégame como **administrador** "
+        "y activa el permiso **Eliminar mensajes**.\n\n"
+        "Así podré gestionar mejor el grupo, borrar los comandos cuando corresponda "
+        "y ofrecer todas las funciones disponibles. ¡Gracias! 🎬"
     )
     try:
         mensaje_aviso = await context.bot.send_message(
