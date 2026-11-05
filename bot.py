@@ -345,26 +345,57 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
     if estado in ("left", "kicked"):
         return
 
-    texto = (
-        "👋 **¡Gracias por agregarme al grupo!**\n\n"
-        "Para desbloquear mis funciones, agrégame como **administrador** "
-        "y activa el permiso **Eliminar mensajes**.\n\n"
-        "Así podré gestionar mejor el grupo, borrar los comandos cuando corresponda "
-        "y ofrecer todas las funciones disponibles. ¡Gracias! 🎬"
-    )
+    await enviar_aviso_permisos(cambio.chat.id, context)
+
+
+async def enviar_aviso_permisos(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Envía un único aviso pendiente por grupo cuando faltan permisos."""
+    chat_id_sql = str(chat_id)
     try:
+        existente = await ejecutar_turso_sql([
+            f"SELECT message_id FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
+        ])
+        filas = existente.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if filas:
+            logger.info(f"Ya existe un aviso de permisos pendiente en el grupo {chat_id}.")
+            return
+
+        texto = (
+            "👋 **¡Gracias por agregarme al grupo!**\\n\\n"
+            "Para desbloquear mis funciones, agrégame como **administrador** "
+            "y activa el permiso **Eliminar mensajes**.\\n\\n"
+            "Así podré gestionar mejor el grupo, borrar los comandos cuando corresponda "
+            "y ofrecer todas las funciones disponibles. ¡Gracias! 🎬"
+        )
         mensaje_aviso = await context.bot.send_message(
-            chat_id=cambio.chat.id,
+            chat_id=chat_id,
             text=texto,
             parse_mode="Markdown"
         )
-        chat_id_sql = str(cambio.chat.id)
         await ejecutar_turso_sql([
             "INSERT OR REPLACE INTO avisos_permisos (chat_id, message_id) "
             f"VALUES ('{chat_id_sql}', {mensaje_aviso.message_id})"
         ])
     except Exception as e:
-        logger.warning(f"No se pudo avisar sobre permisos en el grupo {cambio.chat.id}: {e}")
+        logger.warning(f"No se pudo avisar sobre permisos en el grupo {chat_id}: {e}")
+
+
+async def detectar_bot_agregado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Respaldo: detecta el mensaje de servicio cuando agregan el bot al grupo."""
+    mensaje = update.message
+    if not mensaje or mensaje.chat.type not in ("group", "supergroup"):
+        return
+    if not any(usuario.id == context.bot.id for usuario in (mensaje.new_chat_members or [])):
+        return
+    try:
+        miembro = await context.bot.get_chat_member(mensaje.chat_id, context.bot.id)
+        tiene_permisos = miembro.status == "administrator" and bool(
+            getattr(miembro, "can_delete_messages", False)
+        )
+        if not tiene_permisos:
+            await enviar_aviso_permisos(mensaje.chat_id, context)
+    except Exception as e:
+        logger.warning(f"No se pudo comprobar la entrada del bot en {mensaje.chat_id}: {e}")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1765,6 +1796,7 @@ def main() -> None:
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
     application.add_handler(ChatMemberHandler(revisar_permisos_grupo, ChatMemberHandler.MY_CHAT_MEMBER))
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, detectar_bot_agregado))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("idioma", configurar_idioma))
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
