@@ -345,4 +345,226 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await
+    await update.message.reply_text(
+        f"📺 Guardando: *{texto_args}*\n¿A qué temporada pertenece este capítulo o es película única?",
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
+
+async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("temp_"):
+        return
+
+    temporada = data.replace("temp_", "")
+    file_id = context.user_data.get("pending_file_id")
+    titulo_base = context.user_data.get("pending_titulo")
+    chat_id = str(query.message.chat_id)
+
+    if not file_id or not titulo_base:
+        try:
+            await query.message.reply_text("❌ Session expired. Try /guardar again.")
+        except Exception:
+            pass
+        return
+
+    try:
+        if temporada == "General":
+            titulo_final = titulo_base
+            temp_guardar = "General"
+            
+            titulo_escaped_check = titulo_base.replace("'", "''")
+            sql_dup = f"SELECT id FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped_check.lower()}' AND temporada = 'General'"
+            res_dup = await ejecutar_turso_sql([sql_dup])
+            rows_dup = res_dup.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if rows_dup:
+                try:
+                    await query.message.reply_text(f"⚠️ **Esta película ya se encuentra registrada** con el nombre: *{titulo_base}*.", parse_mode="Markdown")
+                except Exception:
+                    pass
+                return
+        else:
+            num_temp = temporada.replace("Temporada ", "").strip()
+            titulo_escaped = titulo_base.replace("'", "''")
+            temp_escaped = temporada.replace("'", "''")
+            sql_count = f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '{titulo_escaped.lower()}%' AND temporada = '{temp_escaped}'"
+            res_count = await ejecutar_turso_sql([sql_count])
+            
+            count = 0
+            try:
+                results_list = res_count.get("results", [])
+                if results_list and "response" in results_list[0]:
+                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
+                    if rows and "value" in rows[0][0]:
+                        count = int(rows[0][0]["value"])
+            except Exception:
+                count = 0
+
+            siguiente_cap = count + 1
+            titulo_final = f"{titulo_base} ({num_temp}x{siguiente_cap})"
+            temp_guardar = temporada
+
+        titulo_final_escaped = titulo_final.replace("'", "''")
+        temp_guardar_escaped = temp_guardar.replace("'", "''")
+        
+        sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_guardar_escaped}')"
+        await ejecutar_turso_sql([sql_insert])
+        
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await query.message.reply_text(f"✅ ¡Guardado exitosamente!\n📁 *{titulo_final}*", parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error al guardar episodio: {e}", exc_info=True)
+        try:
+            await query.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
+        except Exception:
+            pass
+
+async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    query_texto = " ".join(context.args).strip()
+    if not query_texto:
+        await update.message.reply_text("⚠️ Indica el nombre de la película, serie o anime que deseas eliminar.\nEjemplo: `/eliminar Naruto`", parse_mode="Markdown")
+        return
+
+    try:
+        query_escaped = query_texto.replace("'", "''").lower()
+        sql = f"SELECT id, titulo, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 15"
+        resultado = await ejecutar_turso_sql([sql])
+        
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+        except Exception:
+            pass
+
+        if rows:
+            keyboard = []
+            for row in rows:
+                peli_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else ""
+                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else ""
+                
+                btn_text = f"🗑️ Borrar: {titulo_encontrado}"
+                callback_data = f"delpel_{peli_id}"
+                if len(callback_data.encode('utf-8')) > 64:
+                    callback_data = callback_data[:63]
+                
+                keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(f"🗑️ Selecciona el contenido exacto que deseas eliminar:", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(f"🔍 No encontré ningún contenido con el nombre '{query_texto}'.")
+    except Exception as e:
+        logger.error(f"Error al buscar para eliminar: {e}", exc_info=True)
+        await update.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
+
+async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("delpel_"):
+        return
+
+    peli_id = data.replace("delpel_", "")
+    try:
+        sql = f"DELETE FROM peliculas WHERE id = '{peli_id}'"
+        await ejecutar_turso_sql([sql])
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await query.message.reply_text("✅ ¡Contenido eliminado con éxito!")
+    except Exception as e:
+        logger.error(f"Error eliminando: {e}")
+        try:
+            await query.message.reply_text("❌ Ocurrió un error al intentar eliminar.")
+        except Exception:
+            pass
+
+async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    
+    query_texto = " ".join(context.args).strip()
+    if not query_texto:
+        await update.message.reply_text("⚠️ Ejemplo: `/buscar Naruto`", parse_mode="Markdown")
+        return
+
+    try:
+        query_escaped = query_texto.replace("'", "''").lower()
+        sql = f"SELECT temporada, titulo, file_id FROM peliculas WHERE LOWER(titulo) = '{query_escaped}' OR LOWER(titulo) LIKE '{query_escaped} (%'"
+        resultado = await ejecutar_turso_sql([sql])
+        
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+        except Exception:
+            pass
+
+        if not rows:
+            sql_alt = f"SELECT temporada, titulo, file_id FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
+            resultado_alt = await ejecutar_turso_sql([sql_alt])
+            try:
+                results_alt_list = resultado_alt.get("results", [])
+                if results_alt_list and "response" in results_alt_list[0]:
+                    rows = results_alt_list[0]["response"].get("result", {}).get("rows", [])
+            except Exception:
+                pass
+
+        if rows:
+            chat_tipo = update.message.chat.type
+            user_id = update.effective_user.id
+            chat_actual_id = update.message.chat_id
+
+            if chat_tipo == "private":
+                await update.message.reply_text(f"🎬 Aquí tienes tu archivo solicitado: *{query_texto}*", parse_mode="Markdown")
+                for row in rows:
+                    file_id = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else None
+                    nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else query_texto
+                    if file_id and file_id != "None":
+                        await context.bot.send_video(chat_id=user_id, video=file_id, caption=f"📁 {nombre_cap}")
+                return
+
+            keyboard = []
+            titulos_vistos = set()
+            for row in rows:
+                temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else "General"
+                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else query_texto
+                
+                if titulo_encontrado in titulos_vistos:
+                    continue
+                titulos_vistos.add(titulo_encontrado)
+                
+                if temporada == "General":
+                    button_text = f"🎬 {titulo_encontrado}"
+                    callback_data = f"send_chat_{titulo_encontrado}_General"
+                else:
+                    button_text = f"📺 {query_texto} - {temporada}"
+                    callback_data = f"send_chat_{query_texto}_{temporada}"
+                
+                if len(callback_data.encode('utf-8')) > 64:
+                    callback_data = callback_data[:63]
+                
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(f"🔍 Encontré resultados para '{query_texto}'. Selecciona qué deseas ver:", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(f"🔍 No encontré nada disponible con '{query_texto
