@@ -1359,24 +1359,34 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not texto_args:
         await update.message.reply_text(
-            "⚠️ **Uso incorrecto del comando.**\n\n"
-            "Debes cumplir con uno de estos formatos obligatorios:\n"
-            "• **Película (Título + Año):** `/pedir Interstellar 2014`\n"
-            "• **Serie (Título + Temporada):** `/pedir Euphoria Temporada 1`",
+            "📩 **¿Qué contenido quieres pedir?**\n\n"
+            "Usa uno de estos formatos:\n"
+            "🎬 **Película:** título + año de estreno\n"
+            "Ejemplo: `/pedir Interstellar 2014`\n\n"
+            "📺 **Serie o anime:** título + temporada\n"
+            "Ejemplos:\n"
+            "• `/pedir Loki Temporada 1`\n"
+            "• `/pedir Naruto temp 2`\n"
+            "• `/pedir One Piece 1x8`\n\n"
+            "💡 En películas se indica el año; en series, la temporada.",
             parse_mode="Markdown"
         )
         return
 
     # Validar que cumpla con el formato necesario (Título + Año  O  Título + Temporada X)
     patron_pelicula = re.search(r'^(.*?)\s+(\d{4})$', texto_args, re.IGNORECASE)
-    patron_serie = re.search(r'^(.*?)\s+(temporada\s*\d+|temp\s*\d*|\d+[xX]\d+)$', texto_args, re.IGNORECASE)
+    patron_serie = re.search(r'^(.*?)\s+(temporada\s*\d+|temp\s*\d+|\d+[xX]\d+)$', texto_args, re.IGNORECASE)
 
     if not (patron_pelicula or patron_serie):
         await update.message.reply_text(
             "⚠️ **Formato no válido.**\n\n"
-            "Para poder registrar tu petición correctamente, asegúrate de incluir:\n"
-            "• Para **Películas**: Título y Año de estreno (Ej: `/pedir Batman 2022`)\n"
-            "• Para **Series**: Título y Temporada (Ej: `/pedir Loki Temporada 1`)",
+            "Indica el título y el dato correspondiente:\n"
+            "🎬 **Película:** título + año. Ejemplo: `/pedir Batman 2022`\n"
+            "📺 **Serie o anime:** título + temporada. Ejemplos:\n"
+            "• `/pedir Loki Temporada 1`\n"
+            "• `/pedir Naruto temp 2`\n"
+            "• `/pedir One Piece 1x8`\n\n"
+            "Recuerda: para series se pide la temporada, no el año.",
             parse_mode="Markdown"
         )
         return
