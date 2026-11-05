@@ -1517,7 +1517,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
     application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
     application.add_handler(CallbackQueryHandler(boton_ver_episodio, pattern="^(send_chat_|send_priv_)"))
-    application.add_handler(CallbackQueryHandler(boton_eliminar_pelicula, pattern="^(delpel_|delall_|delind_)"))
+    application.add_handler(CallbackQueryHandler(boton_eliminar_pelicula, pattern="^(delmovie_|delseries_|delseasons_|delseason_|delpel_|delind_)"))
     
     application.add_error_handler(error_handler)
 
