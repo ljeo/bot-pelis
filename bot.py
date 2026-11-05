@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 import httpx
 import re
@@ -298,8 +299,11 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         # Limpiar el título base eliminando palabras como 'temporada', 'temp', '1x1', etc.
         titulo_limpio = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b|\bcap[íi]tulo\s*\d*\b|\bcap\s*\d*\b)', '', raw_title, flags=re.IGNORECASE).strip()
-        if not titulo_limpio:
-            titulo_limpio = raw_title.strip()
+        if not titulo_limpio or not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", titulo_limpio):
+            logger.warning(
+                f"Capítulo omitido: no se detectó el nombre de la serie en el caption: {caption!r}"
+            )
+            return
 
         # Para que el video al enviarse SEPA QUÉ CAPÍTULO ES, guardamos en el título del registro el nombre completo/capítulo
         # Ej: Título registrado = "Prefiero la muerte (1x8)" o el raw_title completo
@@ -1059,6 +1063,11 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             count = int(rows[0][0].get("value", 0)) if rows else 0
             await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada = '{temporada}'"])
             await editar_o_enviar(query, f"✅ {selection['temporada']} eliminada.\n🗑️ Capítulos borrados: {count}", parse_mode="Markdown")
+            try:
+                await asyncio.sleep(4)
+                await query.message.delete()
+            except Exception as e_delete:
+                logger.warning(f"No se pudo borrar el aviso de temporada eliminada: {e_delete}")
         except Exception as e:
             logger.error(f"Error eliminando temporada: {e}", exc_info=True)
             await editar_o_enviar(query, "❌ No se pudo eliminar la temporada.")
@@ -1100,6 +1109,11 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
         try:
             await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id = {int(peli_id)} AND temporada != 'General'"])
             await editar_o_enviar(query, "✅ ¡Capítulo eliminado de la base de datos!")
+            try:
+                await asyncio.sleep(4)
+                await query.message.delete()
+            except Exception as e_delete:
+                logger.warning(f"No se pudo borrar el aviso de capítulo eliminado: {e_delete}")
         except Exception as e:
             logger.error(f"Error eliminando capítulo: {e}", exc_info=True)
             await editar_o_enviar(query, "❌ Ocurrió un error al intentar eliminar el capítulo.")
@@ -1303,6 +1317,20 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
+        if temporada != "General" and rows:
+            def clave_orden_capitulo(row):
+                titulo_capitulo = str(row[1].get("value", "")) if len(row) > 1 else ""
+                coincidencia = re.search(
+                    r"\b(\d{1,2})[xX](\d{1,2})\b|\b[Ss](\d{1,2})[Ee](\d{1,2})\b",
+                    titulo_capitulo
+                )
+                if coincidencia:
+                    temporada_num = int(coincidencia.group(1) or coincidencia.group(3))
+                    episodio_num = int(coincidencia.group(2) or coincidencia.group(4))
+                    return (0, temporada_num, episodio_num)
+                return (1, 0, 0)
+
+            rows.sort(key=clave_orden_capitulo)
         if rows:
             if modo == "priv":
                 try:
