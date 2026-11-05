@@ -233,6 +233,54 @@ async def init_db() -> None:
     except Exception as e_migracion:
         logger.error(f"No se pudo completar la migración de títulos antiguos: {e_migracion}", exc_info=True)
 
+    # Segunda migración: corrige títulos duplicados aunque incluyan emojis/banderas.
+    try:
+        res_mig_v2 = await ejecutar_turso_sql([
+            "SELECT valor FROM config WHERE clave = 'migracion_titulos_episodios_sin_duplicar_v2'"
+        ])
+        filas_mig_v2 = res_mig_v2.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if not (filas_mig_v2 and filas_mig_v2[0][0].get("value") == "ok"):
+            res_v2 = await ejecutar_turso_sql([
+                "SELECT id, titulo FROM peliculas WHERE temporada != 'General' OR temporada IS NULL"
+            ])
+            filas_v2 = res_v2.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            cambios_v2 = []
+
+            def clave_titulo_migracion(valor: str) -> str:
+                return "".join(c.lower() for c in valor if c.isalnum())
+
+            for fila in filas_v2:
+                if len(fila) < 2 or fila[0].get("value") is None:
+                    continue
+                titulo_actual = str(fila[1].get("value") or "")
+                duplicado = re.match(r"^\s*(.*?)\s*\(\s*(.*?)\s*\)\s*$", titulo_actual)
+                if not duplicado:
+                    continue
+                base, interior = duplicado.group(1).strip(), duplicado.group(2).strip()
+                interior_sin_marcador = re.sub(
+                    r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)\s*",
+                    " ",
+                    interior
+                )
+                if not base or clave_titulo_migracion(base) != clave_titulo_migracion(interior_sin_marcador):
+                    continue
+                titulo_nuevo = normalizar_mayusculas_titulo(interior)
+                if titulo_nuevo != titulo_actual:
+                    titulo_sql = titulo_nuevo.replace("'", "''")
+                    cambios_v2.append(
+                        f"UPDATE peliculas SET titulo = '{titulo_sql}' WHERE id = {int(fila[0]['value'])}"
+                    )
+
+            for inicio in range(0, len(cambios_v2), 50):
+                await ejecutar_turso_sql(cambios_v2[inicio:inicio + 50])
+            await ejecutar_turso_sql([
+                "INSERT OR REPLACE INTO config (clave, valor) "
+                "VALUES ('migracion_titulos_episodios_sin_duplicar_v2', 'ok')"
+            ])
+            logger.info(f"Migración v2 de títulos duplicados completada: {len(cambios_v2)} registros actualizados.")
+    except Exception as e_mig_v2:
+        logger.error(f"No se pudo completar la migración v2 de títulos: {e_mig_v2}", exc_info=True)
+
     # Migración única: quitar el título repetido en episodios antiguos de series/animes.
     # Solo modifica el patrón inequívoco "Serie (serie 1x01)" y equivalentes;
     # no toca títulos de películas ni paréntesis que no contengan el mismo nombre + episodio.
@@ -625,6 +673,19 @@ def normalizar_mayusculas_titulo(texto: str) -> str:
     return texto[:indice] + texto[indice].upper() + texto[indice + 1:].lower()
 
 
+def extraer_nombre_base_serie(titulo: str) -> str:
+    """Quita duplicados entre paréntesis y marcadores de episodio, conservando adornos del nombre."""
+    nombre = (titulo or "").strip()
+    if " (" in nombre:
+        nombre = nombre.split(" (", 1)[0].strip()
+    nombre = re.sub(
+        r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)\s*$",
+        "",
+        nombre
+    ).strip()
+    return re.sub(r"[^\w\s]", "", nombre, flags=re.UNICODE).strip()
+
+
 def limpiar_titulo_pelicula(caption: str) -> str:
     """Extrae el título principal de la primera línea y elimina adornos/duplicados."""
     lineas = [linea.strip() for linea in (caption or "").splitlines() if linea.strip()]
@@ -874,12 +935,13 @@ async def mostrar_temporadas_serie(update: Update, context: ContextTypes.DEFAULT
                 await editar_o_enviar(query, "⚠️ No encontré esa serie en el catálogo.")
                 return
             titulo_registro = str(filas_titulo[0][0]["value"])
-            nombre_serie = titulo_registro.split(" (")[0].strip() if " (" in titulo_registro else titulo_registro.strip()
+            nombre_serie = extraer_nombre_base_serie(titulo_registro)
         elif data.startswith("seriestemp_"):
             nombre_serie = data[len("seriestemp_"):].strip()
         else:
             return
-        nombre_escaped = nombre_serie.replace("'", "''").lower()
+        nombre_consulta = extraer_nombre_base_serie(nombre_serie)
+        nombre_escaped = nombre_consulta.replace("'", "''").lower()
         sql = f"SELECT id, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{nombre_escaped}%' AND temporada != 'General' ORDER BY id ASC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
@@ -1613,7 +1675,7 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
             await editar_o_enviar(query, "⚠️ Archivos no encontrados.")
             return
         titulo_registro = str(filas_titulo[0][0]["value"])
-        titulo_busqueda = titulo_registro if temporada == "General" else (titulo_registro.split(" (")[0].strip() if " (" in titulo_registro else titulo_registro.strip())
+        titulo_busqueda = titulo_registro if temporada == "General" else extraer_nombre_base_serie(titulo_registro)
     else:
         if not data.startswith("seltemp_"):
             return
@@ -1625,7 +1687,8 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
     if query.message.chat.type == "private":
         user_id = query.from_user.id
         try:
-            titulo_escaped = titulo_busqueda.replace("'", "''").lower()
+            titulo_consulta = extraer_nombre_base_serie(titulo_busqueda) if temporada != "General" else titulo_busqueda
+            titulo_escaped = titulo_consulta.replace("'", "''").lower()
             temp_escaped = temporada.replace("'", "''")
             if temporada == "General":
                 sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
@@ -1652,7 +1715,8 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
             await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
         return
     if record_id is None:
-        titulo_escaped = titulo_busqueda.replace("'", "''").lower()
+        titulo_consulta = extraer_nombre_base_serie(titulo_busqueda) if temporada != "General" else titulo_busqueda
+        titulo_escaped = titulo_consulta.replace("'", "''").lower()
         temp_escaped = temporada.replace("'", "''")
         if temporada == "General":
             sql_id = f"SELECT id FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General' ORDER BY id ASC LIMIT 1"
@@ -1702,7 +1766,7 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await editar_o_enviar(query, "⚠️ Archivos no encontrados.")
             return
         titulo_registro = str(filas_titulo[0][0]["value"])
-        titulo_busqueda = titulo_registro if temporada == "General" else (titulo_registro.split(" (")[0].strip() if " (" in titulo_registro else titulo_registro.strip())
+        titulo_busqueda = titulo_registro if temporada == "General" else extraer_nombre_base_serie(titulo_registro)
     else:
         parts = limpio.rsplit("_", 1)
         if len(parts) != 2:
