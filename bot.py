@@ -168,6 +168,10 @@ async def init_db() -> None:
         )
     """
     await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes])
+    try:
+        await ejecutar_turso_sql(["ALTER TABLE solicitudes ADD COLUMN mensaje_id INTEGER"])
+    except Exception as e:
+        logger.info(f"Campo mensaje_id ya disponible: {e}")
 
     try:
         await ejecutar_turso_sql([f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{SUPER_ADMIN_ID}')"])
@@ -841,7 +845,7 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
     # Leemos las solicitudes pendientes y comparamos en Python para tolerar
     # diferencias de mayúsculas, signos, año y formato de temporada/episodio.
     resultado = await ejecutar_turso_sql([
-        "SELECT id, chat_id, user_id, titulo, temporada FROM solicitudes"
+        "SELECT id, chat_id, user_id, titulo, temporada, mensaje_id FROM solicitudes"
     ])
     results = resultado.get("results", [])
     rows = results[0].get("response", {}).get("result", {}).get("rows", []) if results else []
@@ -856,6 +860,7 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
         user_id = int(row[2]["value"])
         titulo_solicitado = str(row[3].get("value", ""))
         temporada_solicitada = str(row[4].get("value", "General"))
+        mensaje_id_valor = row[5].get("value") if len(row) > 5 else None
         if normalizar_titulo(titulo_solicitado) != titulo_objetivo:
             continue
         if temporada_solicitada.strip().lower() != temporada_objetivo:
@@ -867,6 +872,11 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
+            if mensaje_id_valor not in (None, "", "null"):
+                try:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=int(mensaje_id_valor))
+                except Exception as e_delete:
+                    logger.warning(f"No se pudo borrar el mensaje de petición: {e_delete}")
             await ejecutar_turso_sql([f"DELETE FROM solicitudes WHERE id = {solicitud_id}"])
             logger.info(f"Notificación enviada por solicitud {solicitud_id} al usuario {user_id}.")
         except Exception as e:
@@ -1493,12 +1503,28 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             except Exception as e_adm:
                 logger.error(f"No se pudo notificar al admin sobre la petición: {e_adm}")
 
-            await update.message.reply_text(
+            mensaje_peticion = await update.message.reply_text(
                 f"⏳ **Petición registrada con éxito:**\n\n"
                 f"Buscamos *'{texto_args}'* pero **no se encuentra en nuestro catálogo**.\n\n"
                 f"🔔 Se ha enviado una notificación automática a los administradores con tu solicitud.",
                 parse_mode="Markdown"
             )
+            try:
+                sql_buscar = (
+                    "SELECT id FROM solicitudes "
+                    f"WHERE chat_id = '{update.effective_chat.id}' "
+                    f"AND user_id = '{user.id}' "
+                    f"AND titulo = '{titulo_solicitado_sql}' "
+                    f"AND temporada = '{temporada_sql}' "
+                    "ORDER BY id DESC LIMIT 1"
+                )
+                res_solicitud = await ejecutar_turso_sql([sql_buscar])
+                filas_solicitud = res_solicitud.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+                if filas_solicitud:
+                    id_solicitud = int(filas_solicitud[0][0]["value"])
+                    await ejecutar_turso_sql([f"UPDATE solicitudes SET mensaje_id = {mensaje_peticion.message_id} WHERE id = {id_solicitud}"])
+            except Exception as e_msg:
+                logger.error(f"No se pudo guardar el ID del aviso: {e_msg}", exc_info=True)
     except Exception as e:
         logger.error(f"Error en comando /pedir: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu petición.")
