@@ -339,6 +339,43 @@ async def enviar_bienvenida_grupo(chat_id: int, context: ContextTypes.DEFAULT_TY
         logger.error(f"No se pudo enviar la bienvenida automática al grupo {chat_id}: {e}", exc_info=True)
 
 
+async def eliminar_aviso_fijado_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Borra el aviso de servicio 'X fijó una foto/mensaje' solo para la bienvenida del bot."""
+    mensaje_servicio = update.message
+    if not mensaje_servicio or mensaje_servicio.chat.type not in ("group", "supergroup"):
+        return
+
+    mensaje_fijado = mensaje_servicio.pinned_message
+    if not mensaje_fijado:
+        return
+
+    chat_id_sql = str(mensaje_servicio.chat_id)
+    try:
+        resultado = await ejecutar_turso_sql([
+            f"SELECT message_id FROM bienvenidas_grupos WHERE chat_id = '{chat_id_sql}'"
+        ])
+        filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if not filas:
+            return
+
+        bienvenida_id = int(filas[0][0]["value"])
+        if mensaje_fijado.message_id != bienvenida_id:
+            return
+
+        await context.bot.delete_message(
+            chat_id=mensaje_servicio.chat_id,
+            message_id=mensaje_servicio.message_id
+        )
+        logger.info(
+            f"Aviso de servicio de fijado eliminado en {mensaje_servicio.chat_id}."
+        )
+    except Exception as e:
+        logger.warning(
+            f"No se pudo borrar el aviso de fijado de bienvenida en "
+            f"{mensaje_servicio.chat_id}: {e}"
+        )
+
+
 async def eliminar_aviso_permisos(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Elimina el aviso de configuración cuando el bot ya puede borrar mensajes."""
     chat_id_sql = str(chat_id)
@@ -1896,6 +1933,7 @@ def main() -> None:
     
     application.add_handler(ChatMemberHandler(revisar_permisos_grupo, ChatMemberHandler.MY_CHAT_MEMBER))
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, detectar_bot_agregado))
+    application.add_handler(MessageHandler(filters.StatusUpdate.PINNED_MESSAGE, eliminar_aviso_fijado_bienvenida))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("idioma", configurar_idioma))
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
