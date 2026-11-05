@@ -1448,12 +1448,20 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     query_texto = " ".join(context.args).strip()
     if not query_texto:
-        await update.message.reply_text("⚠️ Ejemplo: `/buscar Naruto`", parse_mode="Markdown")
+        await update.message.reply_text("⚠️ Ejemplo: `/buscar Naruto` o `/buscar Merlina temporada 2`", parse_mode="Markdown")
         return
 
     try:
-        query_escaped = query_texto.replace("'", "''").lower()
-        sql = f"SELECT id, temporada, titulo FROM peliculas WHERE LOWER(titulo) = '{query_escaped}' OR LOWER(titulo) LIKE '{query_escaped} (%'"
+        patron_busqueda_serie = re.match(r"^(.*?)\\s+(?:temporada|temp)\\s*(\\d+)\\s*$", query_texto, re.IGNORECASE)
+        titulo_consulta = patron_busqueda_serie.group(1).strip() if patron_busqueda_serie else query_texto
+        temporada_filtro = f"Temporada {int(patron_busqueda_serie.group(2))}" if patron_busqueda_serie else None
+        query_escaped = titulo_consulta.replace("'", "''").lower()
+        filtro_temporada = f" AND temporada = '{temporada_filtro}'" if temporada_filtro else ""
+        sql = (
+            "SELECT id, temporada, titulo FROM peliculas "
+            f"WHERE LOWER(titulo) LIKE '%{query_escaped}%'{filtro_temporada} "
+            "ORDER BY id DESC"
+        )
         resultado = await ejecutar_turso_sql([sql])
         
         rows = []
@@ -1464,8 +1472,8 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
 
-        if not rows:
-            sql_alt = f"SELECT id, temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
+        if not rows and not temporada_filtro:
+            sql_alt = f"SELECT id, temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' ORDER BY id DESC"
             resultado_alt = await ejecutar_turso_sql([sql_alt])
             try:
                 results_alt_list = resultado_alt.get("results", [])
@@ -1798,15 +1806,20 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     try:
-        query_escaped = texto_args.replace("'", "''").lower()
         titulo_solicitado = patron_pelicula.group(1).strip() if patron_pelicula else patron_serie.group(1).strip()
         temporada_solicitada = "General"
         if patron_serie:
-            temporada_num = re.search(r"\d+", patron_serie.group(2)).group(0)
-            temporada_solicitada = f"Temporada {temporada_num}"
-        
-        # Buscamos en la base de datos si existe el contenido
-        sql = f"SELECT id, temporada, titulo, file_id FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 10"
+            temporada_num = re.search(r"\\d+", patron_serie.group(2)).group(0)
+            temporada_solicitada = f"Temporada {int(temporada_num)}"
+
+        titulo_sql = titulo_solicitado.replace("'", "''").lower()
+        temporada_sql_busqueda = temporada_solicitada.replace("'", "''")
+        filtro_temporada = f" AND temporada = '{temporada_sql_busqueda}'" if patron_serie else ""
+        sql = (
+            "SELECT id, temporada, titulo, file_id FROM peliculas "
+            f"WHERE LOWER(titulo) LIKE '%{titulo_sql}%'{filtro_temporada} "
+            "ORDER BY id DESC LIMIT 50"
+        )
         resultado = await ejecutar_turso_sql([sql])
         
         rows = []
