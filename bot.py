@@ -339,6 +339,35 @@ async def enviar_bienvenida_grupo(chat_id: int, context: ContextTypes.DEFAULT_TY
         logger.error(f"No se pudo enviar la bienvenida automática al grupo {chat_id}: {e}", exc_info=True)
 
 
+async def eliminar_aviso_permisos(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Elimina el aviso de configuración cuando el bot ya puede borrar mensajes."""
+    chat_id_sql = str(chat_id)
+    try:
+        resultado = await ejecutar_turso_sql([
+            f"SELECT message_id FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
+        ])
+        filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if not filas:
+            return
+
+        mensaje_id = int(filas[0][0]["value"])
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=mensaje_id)
+        except Exception as e_delete:
+            logger.warning(
+                f"No se pudo borrar el aviso de permisos en {chat_id}; "
+                f"se conservará para reintentar cuando cambien los permisos: {e_delete}"
+            )
+            return
+
+        await ejecutar_turso_sql([
+            f"DELETE FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
+        ])
+        logger.info(f"Aviso de permisos eliminado del grupo {chat_id}.")
+    except Exception as e:
+        logger.error(f"Error buscando o limpiando el aviso de permisos en {chat_id}: {e}", exc_info=True)
+
+
 async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Avisa al grupo si el bot no tiene permisos para borrar mensajes."""
     cambio = update.my_chat_member
@@ -359,26 +388,13 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     if estado == "administrator":
-        # Al convertir al bot en administrador, intentar retirar el aviso
-        # de permisos. Telegram solo permitirá borrarlo si conserva
-        # el permiso necesario para eliminar mensajes.
-        try:
-            chat_id_sql = str(cambio.chat.id)
-            resultado_aviso = await ejecutar_turso_sql([
-                f"SELECT message_id FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
-            ])
-            filas_aviso = resultado_aviso.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            if filas_aviso:
-                mensaje_id = int(filas_aviso[0][0]["value"])
-                try:
-                    await context.bot.delete_message(chat_id=cambio.chat.id, message_id=mensaje_id)
-                    await ejecutar_turso_sql([
-                        f"DELETE FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
-                    ])
-                except Exception as e_delete:
-                    logger.warning(f"No se pudo borrar el aviso de permisos en {cambio.chat.id}: {e_delete}")
-        except Exception as e_aviso:
-            logger.error(f"Error limpiando el aviso de permisos en {cambio.chat.id}: {e_aviso}", exc_info=True)
+        if puede_borrar:
+            await eliminar_aviso_permisos(cambio.chat.id, context)
+        else:
+            logger.info(
+                f"El bot ya es administrador en {cambio.chat.id}, "
+                "pero aún no tiene permiso para eliminar mensajes."
+            )
         return
 
     if estado in ("left", "kicked"):
@@ -431,7 +447,9 @@ async def detectar_bot_agregado(update: Update, context: ContextTypes.DEFAULT_TY
         tiene_permisos = miembro.status == "administrator" and bool(
             getattr(miembro, "can_delete_messages", False)
         )
-        if not tiene_permisos:
+        if tiene_permisos:
+            await eliminar_aviso_permisos(mensaje.chat_id, context)
+        else:
             await enviar_aviso_permisos(mensaje.chat_id, context)
     except Exception as e:
         logger.warning(f"No se pudo comprobar la entrada del bot en {mensaje.chat_id}: {e}")
@@ -467,9 +485,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             pass
 
+        bot_info = await context.bot.get_me()
         keyboard = [
             [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
-             InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")]
+             InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")],
+            [InlineKeyboardButton(
+                "➕ Agrégame a tu grupo",
+                url=f"https://t.me/{bot_info.username}?startgroup=true"
+            )]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
