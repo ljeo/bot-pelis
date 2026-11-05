@@ -305,7 +305,7 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         res_file = await ejecutar_turso_sql([sql_check_file])
         rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows", [])
         if rows_file:
-            titulo_para_notificar = re.sub(r"\\s+\\d{4}$", "", titulo_limpio).strip()
+            titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
             logger.info(f"Archivo ya registrado; se revisaron solicitudes pendientes: {raw_title}")
             return
@@ -825,9 +825,9 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
     """Avisa a quienes pidieron el contenido, comparando títulos normalizados."""
     def normalizar_titulo(valor: str) -> str:
         valor = (valor or "").lower().strip()
-        valor = re.sub(r"\\s+\\d{4}$", "", valor)
-        valor = re.sub(r"\\b(temporada|temp)\\s*\\d+\\b", "", valor)
-        valor = re.sub(r"\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[sS]\\d{1,2}[eE]\\d{1,2}\\b", "", valor)
+        valor = re.sub(r"\s+\d{4}$", "", valor)
+        valor = re.sub(r"\b(temporada|temp)\s*\d+\b", "", valor)
+        valor = re.sub(r"\b\d{1,2}[xX]\d{1,2}\b|\b[sS]\d{1,2}[eE]\d{1,2}\b", "", valor)
         valor = re.sub(r"[^a-z0-9áéíóúüñ]", "", valor)
         return valor
 
@@ -862,7 +862,7 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"🎉 ¡Tu contenido <b>{escape(titulo_solicitado)}</b> ya ha sido agregado al catálogo!\\n\\nAbre el catálogo actualizado para encontrarlo.",
+                text=f"🎉 ¡Tu contenido <b>{escape(titulo_solicitado)}</b> ya ha sido agregado al catálogo!\n\nAbre el catálogo actualizado para encontrarlo.",
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
