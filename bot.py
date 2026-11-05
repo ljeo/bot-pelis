@@ -319,7 +319,6 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
     data = query.data or "cat_peliculas"
     pagina = 0
     if "_p_" in data:
@@ -327,65 +326,41 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
             pagina = int(data.split("_p_")[1])
         except ValueError:
             pagina = 0
-
     ITEMS_POR_PAGINA = 8
-
     try:
-        sql = "SELECT DISTINCT titulo FROM peliculas WHERE temporada = 'General' ORDER BY id DESC"
+        sql = "SELECT id, titulo FROM peliculas WHERE temporada = 'General' ORDER BY id DESC"
         resultado = await ejecutar_turso_sql([sql])
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
-
+        results_list = resultado.get("results", [])
+        rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
         titulos_unicos = []
         vistos = set()
-        if rows:
-            for row in rows:
-                titulo = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
-                if not titulo:
-                    continue
-                titulo_clean = titulo.strip()
-                if titulo_clean.lower() in vistos:
-                    continue
-                vistos.add(titulo_clean.lower())
-                titulos_unicos.append(titulo_clean)
-
+        for row in rows:
+            id_registro = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
+            titulo = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else ""
+            if not id_registro or not titulo:
+                continue
+            titulo_clean = titulo.strip()
+            if titulo_clean.lower() in vistos:
+                continue
+            vistos.add(titulo_clean.lower())
+            titulos_unicos.append((id_registro, titulo_clean))
         total_items = len(titulos_unicos)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
-
-        if pagina < 0:
-            pagina = 0
-        elif pagina >= total_paginas:
-            pagina = total_paginas - 1
-
+        pagina = max(0, min(pagina, total_paginas - 1))
         inicio = pagina * ITEMS_POR_PAGINA
-        fin = inicio + ITEMS_POR_PAGINA
-        items_pagina = titulos_unicos[inicio:fin]
-
+        items_pagina = titulos_unicos[inicio:inicio + ITEMS_POR_PAGINA]
         keyboard = []
-        for titulo_clean in items_pagina:
-            callback_data = f"seltemp_{titulo_clean}_General"
-            if len(callback_data.encode('utf-8')) > 64:
-                callback_data = callback_data[:63]
-            keyboard.append([InlineKeyboardButton(f"🎬 {titulo_clean}", callback_data=callback_data)])
-
-        # Botones de paginación
+        for id_registro, titulo_clean in items_pagina:
+            keyboard.append([InlineKeyboardButton(f"🎬 {titulo_clean}", callback_data=f"seltemp_id_{id_registro}_General")])
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_peliculas_p_{pagina - 1}"))
         if pagina < total_paginas - 1:
             nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"cat_peliculas_p_{pagina + 1}"))
-
         if nav_buttons:
             keyboard.append(nav_buttons)
-
         keyboard.append([InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-
         if items_pagina:
             texto_encabezado = f"🎬 **Películas Registradas** (Pág. {pagina + 1}/{total_paginas}):\n\nSelecciona la película que deseas ver:"
             await editar_o_enviar(query, texto_encabezado, reply_markup=reply_markup, parse_mode="Markdown")
@@ -399,7 +374,6 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
 async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
     data = query.data or "cat_series"
     pagina = 0
     if "_p_" in data:
@@ -407,69 +381,44 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
             pagina = int(data.split("_p_")[1])
         except ValueError:
             pagina = 0
-
     ITEMS_POR_PAGINA = 8
-
     try:
-        sql = "SELECT DISTINCT titulo, temporada FROM peliculas WHERE temporada != 'General' ORDER BY id DESC"
+        sql = "SELECT id, titulo, temporada FROM peliculas WHERE temporada != 'General' ORDER BY id DESC"
         resultado = await ejecutar_turso_sql([sql])
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
-
+        results_list = resultado.get("results", [])
+        rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
         series_unicas = []
         vistos = set()
-        if rows:
-            for row in rows:
-                titulo = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
-                if not titulo:
-                    continue
-
-                nombre_base = titulo.split(" (")[0].strip() if " (" in titulo else titulo.strip()
-                nombre_base = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b)', '', nombre_base, flags=re.IGNORECASE).strip()
-                if not nombre_base:
-                    nombre_base = titulo.strip()
-
-                if nombre_base.lower() in vistos:
-                    continue
-                vistos.add(nombre_base.lower())
-                series_unicas.append(nombre_base)
-
+        for row in rows:
+            id_registro = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
+            titulo = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else ""
+            if not id_registro or not titulo:
+                continue
+            nombre_base = titulo.split(" (")[0].strip() if " (" in titulo else titulo.strip()
+            nombre_base = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b)', '', nombre_base, flags=re.IGNORECASE).strip()
+            if not nombre_base:
+                nombre_base = titulo.strip()
+            if nombre_base.lower() in vistos:
+                continue
+            vistos.add(nombre_base.lower())
+            series_unicas.append((id_registro, nombre_base))
         total_items = len(series_unicas)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
-
-        if pagina < 0:
-            pagina = 0
-        elif pagina >= total_paginas:
-            pagina = total_paginas - 1
-
+        pagina = max(0, min(pagina, total_paginas - 1))
         inicio = pagina * ITEMS_POR_PAGINA
-        fin = inicio + ITEMS_POR_PAGINA
-        items_pagina = series_unicas[inicio:fin]
-
+        items_pagina = series_unicas[inicio:inicio + ITEMS_POR_PAGINA]
         keyboard = []
-        for nombre_base in items_pagina:
-            callback_data = f"seriestemp_{nombre_base}"
-            if len(callback_data.encode('utf-8')) > 64:
-                callback_data = callback_data[:63]
-            keyboard.append([InlineKeyboardButton(f"📺 {nombre_base}", callback_data=callback_data)])
-
+        for id_registro, nombre_base in items_pagina:
+            keyboard.append([InlineKeyboardButton(f"📺 {nombre_base}", callback_data=f"seriestemp_id_{id_registro}")])
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_series_p_{pagina - 1}"))
         if pagina < total_paginas - 1:
             nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"cat_series_p_{pagina + 1}"))
-
         if nav_buttons:
             keyboard.append(nav_buttons)
-
         keyboard.append([InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-
         if items_pagina:
             texto_encabezado = f"📺 **Series y Animes Registrados** (Pág. {pagina + 1}/{total_paginas}):\n\nSelecciona la serie o anime que deseas ver:"
             await editar_o_enviar(query, texto_encabezado, reply_markup=reply_markup, parse_mode="Markdown")
@@ -483,38 +432,38 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
 async def mostrar_temporadas_serie(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
-    data = query.data
-    if not data.startswith("seriestemp_"):
-        return
-
-    nombre_serie = data.replace("seriestemp_", "").strip()
-
+    data = query.data or ""
     try:
+        if data.startswith("seriestemp_id_"):
+            serie_id = int(data[len("seriestemp_id_"):])
+            resultado_titulo = await ejecutar_turso_sql([f"SELECT titulo FROM peliculas WHERE id = {serie_id} LIMIT 1"])
+            lista_titulo = resultado_titulo.get("results", [])
+            filas_titulo = lista_titulo[0]["response"].get("result", {}).get("rows", []) if lista_titulo and "response" in lista_titulo[0] else []
+            if not filas_titulo:
+                await editar_o_enviar(query, "⚠️ No encontré esa serie en el catálogo.")
+                return
+            titulo_registro = str(filas_titulo[0][0]["value"])
+            nombre_serie = titulo_registro.split(" (")[0].strip() if " (" in titulo_registro else titulo_registro.strip()
+        elif data.startswith("seriestemp_"):
+            nombre_serie = data[len("seriestemp_"):].strip()
+        else:
+            return
         nombre_escaped = nombre_serie.replace("'", "''").lower()
-        sql = f"SELECT DISTINCT temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{nombre_escaped}%' AND temporada != 'General' ORDER BY temporada ASC"
+        sql = f"SELECT id, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{nombre_escaped}%' AND temporada != 'General' ORDER BY id ASC"
         resultado = await ejecutar_turso_sql([sql])
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
-
+        results_list = resultado.get("results", [])
+        rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
         keyboard = []
-        if rows:
-            for row in rows:
-                temp = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else "Temporada 1"
-                callback_data = f"seltemp_{nombre_serie}_{temp}"
-                if len(callback_data.encode('utf-8')) > 64:
-                    callback_data = callback_data[:63]
-                keyboard.append([InlineKeyboardButton(f"📁 {temp}", callback_data=callback_data)])
-
+        temporadas_vistas = set()
+        for row in rows:
+            id_registro = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
+            temp = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else "Temporada 1"
+            if not id_registro or temp in temporadas_vistas:
+                continue
+            temporadas_vistas.add(temp)
+            keyboard.append([InlineKeyboardButton(f"📁 {temp}", callback_data=f"seltemp_id_{id_registro}_{temp}")])
         keyboard.append([InlineKeyboardButton("🔙 Volver a Series", callback_data="cat_series")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await editar_o_enviar(query, f"📺 **{nombre_serie}**\n\nSelecciona la temporada que deseas ver:", reply_markup=reply_markup, parse_mode="Markdown")
+        await editar_o_enviar(query, f"📺 **{nombre_serie}**\n\nSelecciona la temporada que deseas ver:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error mostrando temporadas de serie: {e}", exc_info=True)
         keyboard = [[InlineKeyboardButton("🔙 Volver a Series", callback_data="cat_series")]]
@@ -950,8 +899,6 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
                     
                     btn_text = f"🗑️ Borrar: {titulo_encontrado}"
                     callback_data = f"delpel_{peli_id}"
-                    if len(callback_data.encode('utf-8')) > 64:
-                        callback_data = callback_data[:63]
                     
                     keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
 
@@ -987,7 +934,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         query_escaped = query_texto.replace("'", "''").lower()
-        sql = f"SELECT temporada, titulo FROM peliculas WHERE LOWER(titulo) = '{query_escaped}' OR LOWER(titulo) LIKE '{query_escaped} (%'"
+        sql = f"SELECT id, temporada, titulo FROM peliculas WHERE LOWER(titulo) = '{query_escaped}' OR LOWER(titulo) LIKE '{query_escaped} (%'"
         resultado = await ejecutar_turso_sql([sql])
         
         rows = []
@@ -999,7 +946,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             pass
 
         if not rows:
-            sql_alt = f"SELECT temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
+            sql_alt = f"SELECT id, temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
             resultado_alt = await ejecutar_turso_sql([sql_alt])
             try:
                 results_alt_list = resultado_alt.get("results", [])
@@ -1012,8 +959,9 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             keyboard = []
             titulos_vistos = set()
             for row in rows:
-                temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else "General"
-                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else query_texto
+                id_registro = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else ""
+                temporada = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else "General"
+                titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else query_texto
                 
                 nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
                 clave_unica = f"{nombre_base.lower()}_{temporada.lower()}"
@@ -1021,16 +969,14 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     continue
                 titulos_vistos.add(clave_unica)
                 
+                if not id_registro:
+                    continue
                 if temporada == "General":
                     button_text = f"🎬 {titulo_encontrado}"
-                    callback_data = f"seltemp_{titulo_encontrado}_General"
                 else:
                     button_text = f"📺 {nombre_base} - {temporada}"
-                    callback_data = f"seltemp_{nombre_base}_{temporada}"
-                
-                if len(callback_data.encode('utf-8')) > 64:
-                    callback_data = callback_data[:63]
-                
+                callback_data = f"seltemp_id_{id_registro}_{temporada}"
+
                 btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
                 if btn_tuple not in keyboard:
                     keyboard.append(btn_tuple)
@@ -1047,46 +993,52 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
-    data = query.data
-    if not data.startswith("seltemp_"):
-        return
-
-    resto = data.replace("seltemp_", "")
-    parts = resto.rsplit("_", 1)
-    if len(parts) != 2:
-        await editar_o_enviar(query, "❌ Error.")
-        return
-
-    titulo_busqueda, temporada = parts
-    chat_type = query.message.chat.type
-
-    if chat_type == "private":
+    data = query.data or ""
+    record_id = None
+    if data.startswith("seltemp_id_"):
+        partes = data.split("_", 3)
+        if len(partes) != 4:
+            await editar_o_enviar(query, "❌ Error.")
+            return
+        try:
+            record_id = int(partes[2])
+        except ValueError:
+            await editar_o_enviar(query, "❌ Error.")
+            return
+        temporada = partes[3]
+        resultado_titulo = await ejecutar_turso_sql([f"SELECT titulo FROM peliculas WHERE id = {record_id} LIMIT 1"])
+        lista_titulo = resultado_titulo.get("results", [])
+        filas_titulo = lista_titulo[0]["response"].get("result", {}).get("rows", []) if lista_titulo and "response" in lista_titulo[0] else []
+        if not filas_titulo:
+            await editar_o_enviar(query, "⚠️ Archivos no encontrados.")
+            return
+        titulo_registro = str(filas_titulo[0][0]["value"])
+        titulo_busqueda = titulo_registro if temporada == "General" else (titulo_registro.split(" (")[0].strip() if " (" in titulo_registro else titulo_registro.strip())
+    else:
+        if not data.startswith("seltemp_"):
+            return
+        parts = data[len("seltemp_"):].rsplit("_", 1)
+        if len(parts) != 2:
+            await editar_o_enviar(query, "❌ Error.")
+            return
+        titulo_busqueda, temporada = parts
+    if query.message.chat.type == "private":
         user_id = query.from_user.id
         try:
             titulo_escaped = titulo_busqueda.replace("'", "''").lower()
             temp_escaped = temporada.replace("'", "''")
-            
             if temporada == "General":
                 sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
             else:
                 sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}' ORDER BY id ASC"
-                
             resultado = await ejecutar_turso_sql([sql])
-            rows = []
-            try:
-                results_list = resultado.get("results", [])
-                if results_list and "response" in results_list[0]:
-                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
-            except Exception:
-                pass
-
+            results_list = resultado.get("results", [])
+            rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
             if rows:
                 try:
                     await query.message.delete()
                 except Exception:
                     pass
-
                 await context.bot.send_message(chat_id=user_id, text=f"🎬 Aquí tienes tu contenido solicitado: *{titulo_busqueda}*", parse_mode="Markdown")
                 for row in rows:
                     file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
@@ -1099,55 +1051,76 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
             logger.error(f"Error al enviar por DM: {e}", exc_info=True)
             await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
         return
-
-    keyboard = [
-        [
-            InlineKeyboardButton("💬 En este chat", callback_data=f"send_chat_{titulo_busqueda}_{temporada}"),
-            InlineKeyboardButton("🔒 En mensaje privado", callback_data=f"send_priv_{titulo_busqueda}_{temporada}")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if record_id is None:
+        titulo_escaped = titulo_busqueda.replace("'", "''").lower()
+        temp_escaped = temporada.replace("'", "''")
+        if temporada == "General":
+            sql_id = f"SELECT id FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General' ORDER BY id ASC LIMIT 1"
+        else:
+            sql_id = f"SELECT id FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}' ORDER BY id ASC LIMIT 1"
+        resultado_id = await ejecutar_turso_sql([sql_id])
+        lista_id = resultado_id.get("results", [])
+        filas_id = lista_id[0]["response"].get("result", {}).get("rows", []) if lista_id and "response" in lista_id[0] else []
+        if not filas_id:
+            await editar_o_enviar(query, "⚠️ Archivos no encontrados.")
+            return
+        record_id = int(filas_id[0][0]["value"])
+    keyboard = [[
+        InlineKeyboardButton("💬 En este chat", callback_data=f"send_chat_id_{record_id}_{temporada}"),
+        InlineKeyboardButton("🔒 En mensaje privado", callback_data=f"send_priv_id_{record_id}_{temporada}")
+    ]]
     texto_mostrar = titulo_busqueda if temporada == "General" else f"{titulo_busqueda} ({temporada})"
-    await editar_o_enviar(query, f"📍 ¿Dónde prefieres recibir: *{texto_mostrar}*?", parse_mode="Markdown", reply_markup=reply_markup)
+    await editar_o_enviar(query, f"📍 ¿Dónde prefieres recibir: *{texto_mostrar}*?", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
-    data = query.data
-    if not data.startswith("send_"):
+    data = query.data or ""
+    if data.startswith("send_chat_"):
+        modo = "chat"
+        limpio = data[len("send_chat_"):]
+    elif data.startswith("send_priv_"):
+        modo = "priv"
+        limpio = data[len("send_priv_"):]
+    else:
         return
-
-    modo = "chat" if "send_chat_" in data else "priv"
-    limpio = data.replace("send_chat_", "").replace("send_priv_", "")
-    
-    parts = limpio.rsplit("_", 1)
-    if len(parts) != 2:
-        await editar_o_enviar(query, "❌ Error.")
-        return
-
-    titulo_busqueda, temporada = parts
+    if limpio.startswith("id_"):
+        partes = limpio.split("_", 2)
+        if len(partes) != 3:
+            await editar_o_enviar(query, "❌ Error.")
+            return
+        try:
+            record_id = int(partes[1])
+        except ValueError:
+            await editar_o_enviar(query, "❌ Error.")
+            return
+        temporada = partes[2]
+        resultado_titulo = await ejecutar_turso_sql([f"SELECT titulo FROM peliculas WHERE id = {record_id} LIMIT 1"])
+        lista_titulo = resultado_titulo.get("results", [])
+        filas_titulo = lista_titulo[0]["response"].get("result", {}).get("rows", []) if lista_titulo and "response" in lista_titulo[0] else []
+        if not filas_titulo:
+            await editar_o_enviar(query, "⚠️ Archivos no encontrados.")
+            return
+        titulo_registro = str(filas_titulo[0][0]["value"])
+        titulo_busqueda = titulo_registro if temporada == "General" else (titulo_registro.split(" (")[0].strip() if " (" in titulo_registro else titulo_registro.strip())
+    else:
+        parts = limpio.rsplit("_", 1)
+        if len(parts) != 2:
+            await editar_o_enviar(query, "❌ Error.")
+            return
+        titulo_busqueda, temporada = parts
     user_id = query.from_user.id
     chat_actual_id = query.message.chat_id
-
     try:
         titulo_escaped = titulo_busqueda.replace("'", "''").lower()
         temp_escaped = temporada.replace("'", "''")
-        
         if temporada == "General":
             sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
         else:
             sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}' ORDER BY id ASC"
-            
         resultado = await ejecutar_turso_sql([sql])
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
-
+        results_list = resultado.get("results", [])
+        rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
         if rows:
             if modo == "priv":
                 try:
@@ -1165,15 +1138,12 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     await query.message.delete()
                 except Exception:
                     pass
-                
                 msg_enviando = await context.bot.send_message(chat_id=chat_actual_id, text="🎬 Enviando...")
-                
                 for row in rows:
                     file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
                     nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
                     if file_id and file_id != "None":
                         await context.bot.send_video(chat_id=chat_actual_id, video=file_id, caption=f"📁 {nombre_cap}")
-                
                 try:
                     await msg_enviando.delete()
                 except Exception:
@@ -1285,7 +1255,7 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         query_escaped = texto_args.replace("'", "''").lower()
         
         # Buscamos en la base de datos si existe el contenido
-        sql = f"SELECT temporada, titulo, file_id FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 10"
+        sql = f"SELECT id, temporada, titulo, file_id FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 10"
         resultado = await ejecutar_turso_sql([sql])
         
         rows = []
@@ -1300,8 +1270,9 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             keyboard = []
             titulos_vistos = set()
             for row in rows:
-                temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else "General"
-                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else texto_args
+                id_registro = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else ""
+                temporada = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else "General"
+                titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else texto_args
                 
                 nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
                 clave_unica = f"{nombre_base.lower()}_{temporada.lower()}"
@@ -1309,16 +1280,14 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     continue
                 titulos_vistos.add(clave_unica)
                 
+                if not id_registro:
+                    continue
                 if temporada == "General":
                     button_text = f"🎬 Ver: {titulo_encontrado}"
-                    callback_data = f"seltemp_{titulo_encontrado}_General"
                 else:
                     button_text = f"📺 Ver: {nombre_base} - {temporada}"
-                    callback_data = f"seltemp_{nombre_base}_{temporada}"
-                
-                if len(callback_data.encode('utf-8')) > 64:
-                    callback_data = callback_data[:63]
-                
+                callback_data = f"seltemp_id_{id_registro}_{temporada}"
+
                 btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
                 if btn_tuple not in keyboard:
                     keyboard.append(btn_tuple)
