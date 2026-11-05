@@ -537,4 +537,45 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
         await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
 
 async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message
+    if not update.message or not update.message.from_user:
+        return
+    user_id = update.effective_user.id
+    if not await es_admin(user_id):
+        await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    query_texto = " ".join(context.args).strip()
+    if not query_texto:
+        await update.message.reply_text("⚠️ Indica el nombre de la película, serie o anime que deseas eliminar.\nEjemplo: `/eliminar Naruto` o `/eliminar Batman`", parse_mode="Markdown")
+        return
+
+    try:
+        query_escaped = query_texto.replace("'", "''").lower()
+        sql = f"SELECT id, titulo, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 15"
+        resultado = await ejecutar_turso_sql([sql])
+        
+        rows = []
+        try:
+            results_list = resultado.get("results", [])
+            if results_list and "response" in results_list[0]:
+                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+        except Exception:
+            pass
+
+        if rows:
+            keyboard = []
+            for row in rows:
+                peli_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else ""
+                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else ""
+                
+                btn_text = f"🗑️ Borrar: {titulo_encontrado}"
+                callback_data = f"delpel_{peli_id}"
+                if len(callback_data.encode('utf-8')) > 64:
+                    callback_data = callback_data[:63]
+                
+                keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(f"🗑️ Selecciona el contenido exacto que deseas eliminar de la base de datos:", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(f"
