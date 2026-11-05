@@ -328,7 +328,7 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         # Avisar a quienes solicitaron este título cuando se publica directamente en el canal.
         try:
-            titulo_para_notificar = re.sub(r"\\s+\\d{4}$", "", titulo_limpio).strip()
+            titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
         except Exception as e_notif:
             logger.error(f"Error notificando solicitudes resueltas desde el canal: {e_notif}", exc_info=True)
