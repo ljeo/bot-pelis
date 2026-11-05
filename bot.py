@@ -249,7 +249,6 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     file_id = message.video.file_id
     chat_id = str(message.chat_id)
 
-    # Comprobación de duplicado estricto por file_id (para no guardar nunca el mismo video 2 veces)
     try:
         sql_check_file = f"SELECT id FROM peliculas WHERE file_id = '{file_id}'"
         res_file = await ejecutar_turso_sql([sql_check_file])
@@ -260,7 +259,6 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception:
         pass
 
-    # Expresión regular para detectar formatos de serie: 1x01, S01E01, Temporada X, Temp 1, Cap 1, etc.
     series_pattern = re.compile(
         r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*(\d+)\b|\btemp\b|\bcap[íi]tulo\b|\bcap\b|\bepisodio\b)',
         re.IGNORECASE
@@ -271,7 +269,6 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     if match:
         group_match = match.group(0)
         
-        # Determinar la temporada
         if "x" in group_match.lower():
             parts_x = group_match.lower().split("x")
             temp_num = parts_x[0]
@@ -286,13 +283,10 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         else:
             temporada = "Temporada 1"
 
-        # Limpiar el título base eliminando palabras como 'temporada', 'temp', '1x1', etc.
         titulo_limpio = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b|\bcap[íi]tulo\s*\d*\b|\bcap\s*\d*\b)', '', raw_title, flags=re.IGNORECASE).strip()
         if not titulo_limpio:
             titulo_limpio = raw_title.strip()
 
-        # Para que el video al enviarse SEPA QUÉ CAPÍTULO ES, guardamos en el título del registro el nombre completo/capítulo
-        # Ej: Título registrado = "Prefiero la muerte (1x8)" o el raw_title completo
         titulo_guardar = f"{titulo_limpio} ({raw_title})" if raw_title.lower() != titulo_limpio.lower() else raw_title
     else:
         temporada = "General"
@@ -302,7 +296,6 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         titulo_escaped = titulo_guardar.replace("'", "''")
         temp_escaped = temporada.replace("'", "''")
         
-        # Verificar duplicado exacto por título final y temporada
         sql_check = f"SELECT id FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped.lower()}' AND temporada = '{temp_escaped}'"
         res_check = await ejecutar_turso_sql([sql_check])
         rows_check = res_check.get("results", [])[0]["response"].get("result", {}).get("rows", [])
@@ -316,6 +309,7 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Error procesando canal_post: {e}", exc_info=True)
 
+# LECTURA DE CATÁLOGO ROBUTA Y FLEXIBLE
 async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -331,13 +325,16 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
     ITEMS_POR_PAGINA = 8
 
     try:
-        sql = "SELECT DISTINCT titulo FROM peliculas WHERE temporada = 'General' ORDER BY id DESC"
+        sql = "SELECT id, titulo, temporada FROM peliculas ORDER BY id DESC"
         resultado = await ejecutar_turso_sql([sql])
+        
         rows = []
         try:
             results_list = resultado.get("results", [])
             if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
+                resp_obj = results_list[0]["response"]
+                if "result" in resp_obj and "rows" in resp_obj["result"]:
+                    rows = resp_obj["result"]["rows"]
         except Exception:
             pass
 
@@ -345,14 +342,35 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         vistos = set()
         if rows:
             for row in rows:
-                titulo = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
-                if not titulo:
+                try:
+                    titulo = ""
+                    temp_val = "General"
+                    
+                    for col in row:
+                        if isinstance(col, dict) and "value" in col:
+                            val_str = str(col["value"])
+                            if not titulo and not val_str.startswith("Temporada") and val_str != "General":
+                                titulo = val_str
+                            elif val_str.startswith("Temporada") or val_str == "General":
+                                temp_val = val_str
+                    
+                    if not titulo and len(row) > 1 and row[1] and "value" in row[1]:
+                        titulo = str(row[1]["value"])
+
+                    if not titulo:
+                        continue
+
+                    temp_lower = temp_val.strip().lower()
+                    es_serie = "temporada" in temp_lower or "temp" in temp_lower or "x" in temp_lower
+                    
+                    if not es_serie:
+                        titulo_clean = titulo.strip()
+                        if not titulo_clean or titulo_clean.lower() in vistos:
+                            continue
+                        vistos.add(titulo_clean.lower())
+                        titulos_unicos.append(titulo_clean)
+                except Exception:
                     continue
-                titulo_clean = titulo.strip()
-                if titulo_clean.lower() in vistos:
-                    continue
-                vistos.add(titulo_clean.lower())
-                titulos_unicos.append(titulo_clean)
 
         total_items = len(titulos_unicos)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
@@ -373,7 +391,6 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
                 callback_data = callback_data[:63]
             keyboard.append([InlineKeyboardButton(f"🎬 {titulo_clean}", callback_data=callback_data)])
 
-        # Botones de paginación
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_peliculas_p_{pagina - 1}"))
@@ -392,7 +409,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         else:
             await editar_o_enviar(query, "⚠️ No hay películas registradas todavía.", reply_markup=reply_markup)
     except Exception as e:
-        logger.error(f"Error cargando películas: {e}", exc_info=True)
+        logger.error(f"Error crítico cargando películas: {e}", exc_info=True)
         keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
         await editar_o_enviar(query, "❌ Ocurrió un error al cargar las películas.", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -629,7 +646,6 @@ async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_T
 
     texto_msg = update.message.text or ""
 
-    # Si el usuario escribe un comando (empieza por /) o desea cancelar, limpiamos estados de espera
     if texto_msg.startswith("/"):
         context.user_data.pop("esperando_foto_bienvenida", None)
         context.user_data.pop("esperando_texto_bienvenida", None)
@@ -647,7 +663,6 @@ async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_T
             except Exception:
                 await update.message.reply_text("❌ Ocurrió un error al guardar la imagen.")
         else:
-            # Si no envía foto pero envía un texto normal, cancelamos el estado para no dejarlo atrapado
             context.user_data.pop("esperando_foto_bienvenida", None)
             keyboard = [[InlineKeyboardButton("⚙️ Volver a Configuración", callback_data="set_bienvenida")]]
             await update.message.reply_text("ℹ️ Se canceló la espera de foto porque no enviaste una imagen.\n\nPuedes intentar de nuevo desde la configuración.", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -776,6 +791,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     elif data == "set_admins_info":
         await editar_o_enviar(query, "👥 **Gestión de Administradores:**\n\nPara agregar usa: `/addadmin [ID]`\nPara eliminar usa: `/deladmin [ID]`", parse_mode="Markdown")
 
+# GUARDADO REFORZADO CONTRA ERRORES
 async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -790,35 +806,26 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
     chat_id = str(query.message.chat_id)
 
     if not file_id or not titulo_base:
-        await editar_o_enviar(query, "❌ Session expired. Try /guardar again.")
+        await editar_o_enviar(query, "❌ Sesión expirada. Usa /guardar nuevamente.")
         return
 
     try:
+        titulo_escaped = titulo_base.replace("'", "''")
+        temp_escaped = temporada.replace("'", "''")
+
         if temporada == "General":
             titulo_final = titulo_base
             temp_guardar = "General"
-            
-            titulo_escaped_check = titulo_base.replace("'", "''")
-            sql_dup = f"SELECT id FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped_check.lower()}' AND temporada = 'General'"
-            res_dup = await ejecutar_turso_sql([sql_dup])
-            rows_dup = res_dup.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            if rows_dup:
-                await editar_o_enviar(query, f"⚠️ **Esta película ya se encuentra registrada** con el nombre: *{titulo_base}*.", parse_mode="Markdown")
-                return
         else:
             num_temp = temporada.replace("Temporada ", "").strip()
-            titulo_escaped = titulo_base.replace("'", "''")
-            temp_escaped = temporada.replace("'", "''")
             sql_count = f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '{titulo_escaped.lower()}%' AND temporada = '{temp_escaped}'"
             res_count = await ejecutar_turso_sql([sql_count])
             
             count = 0
             try:
-                results_list = res_count.get("results", [])
-                if results_list and "response" in results_list[0]:
-                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
-                    if rows and "value" in rows[0][0]:
-                        count = int(rows[0][0]["value"])
+                rows = res_count.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+                if rows and "value" in rows[0][0]:
+                    count = int(rows[0][0]["value"])
             except Exception:
                 count = 0
 
@@ -827,16 +834,8 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
             temp_guardar = temporada
 
         titulo_final_escaped = titulo_final.replace("'", "''")
-        temp_guardar_escaped = temp_guardar.replace("'", "''")
         
-        sql_check_exacto = f"SELECT id FROM peliculas WHERE LOWER(titulo) = '{titulo_final_escaped.lower()}' AND temporada = '{temp_guardar_escaped}'"
-        res_exacto = await ejecutar_turso_sql([sql_check_exacto])
-        rows_exacto = res_exacto.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-        if rows_exacto:
-            await editar_o_enviar(query, f"⚠️ **Este contenido ya se encuentra registrado** con el nombre: *{titulo_final}*.", parse_mode="Markdown")
-            return
-
-        sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_guardar_escaped}')"
+        sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_final_escaped}', '{file_id}', '{temp_escaped}')"
         await ejecutar_turso_sql([sql_insert])
         
         await editar_o_enviar(query, f"✅ ¡Guardado exitosamente!\n📁 *{titulo_final}*", parse_mode="Markdown")
@@ -872,7 +871,6 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
 
         if rows:
             cant_archivos = len(rows)
-            # Limpiamos el nombre base para mostrarlo claramente
             nombre_base = rows[0][1]["value"].split(" (")[0].strip() if len(rows[0]) > 1 and "value" in rows[0][1] else query_texto
             nombre_base = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b)', '', nombre_base, flags=re.IGNORECASE).strip() or query_texto
 
@@ -900,13 +898,11 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
 
     data = query.data
 
-    # 1. BORRAR TODO DE UN SOLO CLIC
     if data.startswith("delall_"):
         query_texto = data.replace("delall_", "").strip()
         query_escaped = query_texto.replace("'", "''").lower()
 
         try:
-            # Primero contamos cuántos había
             sql_count = f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
             res_c = await ejecutar_turso_sql([sql_count])
             count = 0
@@ -917,7 +913,6 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             except Exception:
                 pass
 
-            # Ejecutamos borrado masivo
             sql_del = f"DELETE FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%'"
             await ejecutar_turso_sql([sql_del])
             await editar_o_enviar(query, f"✅ ¡Se eliminó exitosamente la serie/película completa!\n🗑️ **Total borrados:** `{count}` registros.", parse_mode="Markdown")
@@ -926,7 +921,6 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             await editar_o_enviar(query, "❌ Ocurrió un error al intentar eliminar el contenido.")
         return
 
-    # 2. MOSTRAR LISTA DE CAPÍTULOS INDIVIDUALES
     if data.startswith("delind_"):
         query_texto = data.replace("delind_", "").strip()
         query_escaped = query_texto.replace("'", "''").lower()
@@ -964,7 +958,6 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             await editar_o_enviar(query, "❌ Ocurrió un error al procesar tu solicitud.")
         return
 
-    # 3. BORRAR UN SOLO CAPÍTULO INDIVIDUAL POR ID
     if data.startswith("delpel_"):
         peli_id = data.replace("delpel_", "")
         try:
@@ -1043,7 +1036,6 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error al buscar: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
 
-# SELECCIÓN Y ENVÍO CON IDENTIFICACIÓN CLARA DE EPISODIOS
 async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -1216,209 +1208,4 @@ async def boton_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def agregar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
         return
-    user_id = update.effective_user.id
-    if user_id != SUPER_ADMIN_ID:
-        await update.message.reply_text("⛔ Solo el dueño principal puede agregar administradores.")
-        return
-    args = context.args
-    if not args:
-        await update.message.reply_text("⚠️ Debes indicar el ID del usuario. Ejemplo: `/addadmin 123456789`", parse_mode="Markdown")
-        return
-    try:
-        sql = f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{args[0].strip()}')"
-        await ejecutar_turso_sql([sql])
-        await update.message.reply_text("✅ ¡Usuario agregado como administrador correctamente!")
-    except Exception:
-        await update.message.reply_text("❌ Error al procesar.")
-
-async def quitar_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
-        return
-    user_id = update.effective_user.id
-    if user_id != SUPER_ADMIN_ID:
-        await update.message.reply_text("⛔ Solo el dueño principal puede quitar administradores.")
-        return
-    args = context.args
-    if not args:
-        await update.message.reply_text("⚠️ Debes indicar el ID del usuario. Ejemplo: `/deladmin 123456789`", parse_mode="Markdown")
-        return
-    try:
-        sql = f"DELETE FROM admins WHERE user_id = '{args[0].strip()}'"
-        await ejecutar_turso_sql([sql])
-        await update.message.reply_text("✅ ¡Administrador removido correctamente!")
-    except Exception:
-        await update.message.reply_text("❌ Error al procesar.")
-
-async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user:
-        return
-
-    user = update.effective_user
-    user_info = f"@{user.username}" if user.username else f"{user.first_name} (ID: `{user.id}`)"
-    texto_args = " ".join(context.args).strip()
-
-    if not texto_args:
-        await update.message.reply_text(
-            "⚠️ **Uso incorrecto del comando.**\n\n"
-            "Debes cumplir con uno de estos formatos obligatorios:\n"
-            "• **Película (Título + Año):** `/pedir Interstellar 2014`\n"
-            "• **Serie (Título + Temporada):** `/pedir Euphoria Temporada 1`",
-            parse_mode="Markdown"
-        )
-        return
-
-    # Validar que cumpla con el formato necesario (Título + Año  O  Título + Temporada X)
-    patron_pelicula = re.search(r'^(.*?)\s+(\d{4})$', texto_args, re.IGNORECASE)
-    patron_serie = re.search(r'^(.*?)\s+(temporada\s*\d+|temp\s*\d*|\d+[xX]\d+)$', texto_args, re.IGNORECASE)
-
-    if not (patron_pelicula or patron_serie):
-        await update.message.reply_text(
-            "⚠️ **Formato no válido.**\n\n"
-            "Para poder registrar tu petición correctamente, asegúrate de incluir:\n"
-            "• Para **Películas**: Título y Año de estreno (Ej: `/pedir Batman 2022`)\n"
-            "• Para **Series**: Título y Temporada (Ej: `/pedir Loki Temporada 1`)",
-            parse_mode="Markdown"
-        )
-        return
-
-    try:
-        query_escaped = texto_args.replace("'", "''").lower()
-        
-        # Buscamos en la base de datos si existe el contenido
-        sql = f"SELECT temporada, titulo, file_id FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' LIMIT 10"
-        resultado = await ejecutar_turso_sql([sql])
-        
-        rows = []
-        try:
-            results_list = resultado.get("results", [])
-            if results_list and "response" in results_list[0]:
-                rows = results_list[0]["response"].get("result", {}).get("rows", [])
-        except Exception:
-            pass
-
-        if rows:
-            keyboard = []
-            titulos_vistos = set()
-            for row in rows:
-                temporada = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else "General"
-                titulo_encontrado = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else texto_args
-                
-                nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
-                clave_unica = f"{nombre_base.lower()}_{temporada.lower()}"
-                if clave_unica in titulos_vistos:
-                    continue
-                titulos_vistos.add(clave_unica)
-                
-                if temporada == "General":
-                    button_text = f"🎬 Ver: {titulo_encontrado}"
-                    callback_data = f"seltemp_{titulo_encontrado}_General"
-                else:
-                    button_text = f"📺 Ver: {nombre_base} - {temporada}"
-                    callback_data = f"seltemp_{nombre_base}_{temporada}"
-                
-                if len(callback_data.encode('utf-8')) > 64:
-                    callback_data = callback_data[:63]
-                
-                btn_tuple = [InlineKeyboardButton(button_text, callback_data=callback_data)]
-                if btn_tuple not in keyboard:
-                    keyboard.append(btn_tuple)
-
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"🎉 **¡Buenas noticias!** Encontré contenido disponible para: *{texto_args}*\n\nSelecciona lo que deseas ver:",
-                reply_markup=reply_markup,
-                parse_mode="Markdown"
-            )
-        else:
-            # Si cumple el formato y NO está en la BD, se notifica al Administrador Principal
-            try:
-                msg_admin = (
-                    f"📩 **¡NUEVA PETICIÓN RECIBIDA!**\n\n"
-                    f"👤 **Usuario:** {user_info}\n"
-                    f"🎬 **Contenido solicitado:** `{texto_args}`"
-                )
-                await context.bot.send_message(chat_id=SUPER_ADMIN_ID, text=msg_admin, parse_mode="Markdown")
-            except Exception as e_adm:
-                logger.error(f"No se pudo notificar al admin sobre la petición: {e_adm}")
-
-            await update.message.reply_text(
-                f"⏳ **Petición registrada con éxito:**\n\n"
-                f"Buscamos *'{texto_args}'* pero **no se encuentra en nuestro catálogo**.\n\n"
-                f"🔔 Se ha enviado una notificación automática a los administradores con tu solicitud.",
-                parse_mode="Markdown"
-            )
-    except Exception as e:
-        logger.error(f"Error en comando /pedir: {e}", exc_info=True)
-        await update.message.reply_text("❌ Ocurrió un error al procesar tu petición.")
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Excepción global capturada:", exc_info=context.error)
-
-
-async def post_init(application) -> None:
-    comandos = [
-        BotCommand("start", "Inicia el bot / Menú principal"),
-        BotCommand("buscar", "Busca películas, series o animes"),
-        BotCommand("pedir", "Solicita o verifica una película o serie"),
-        BotCommand("guardar", "Guarda un video (responde a un archivo)"),
-        BotCommand("eliminar", "Elimina una película o serie de la BD"),
-        BotCommand("idioma", "Cambia el idioma del bot"),
-        BotCommand("settings", "Panel de configuración general"),
-        BotCommand("setbienvenida", "Configura mensaje/imagen de bienvenida"),
-        BotCommand("addadmin", "Agrega un administrador (Solo Dueño)"),
-        BotCommand("deladmin", "Remueve un administrador (Solo Dueño)")
-    ]
-    try:
-        # Registramos los comandos globalmente y específicamente para chats privados
-        await application.bot.set_my_commands(comandos, scope=BotCommandScopeDefault())
-        await application.bot.set_my_commands(comandos, scope=BotCommandScopeAllPrivateChats())
-        logger.info("✅ Lista de comandos (/...) registrada en la interfaz de Telegram con éxito.")
-    except Exception as e:
-        logger.error(f"Error al registrar comandos en Telegram: {e}")
-
-def main() -> None:
-    threading.Thread(target=start_server, daemon=True).start()
-
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-    
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("idioma", configurar_idioma))
-    application.add_handler(CommandHandler("guardar", guardar_pelicula))
-    application.add_handler(CommandHandler("buscar", buscar_pelicula))
-    application.add_handler(CommandHandler("pedir", pedir_contenido))
-    application.add_handler(CommandHandler("eliminar", menu_eliminar_contenido))
-    application.add_handler(CommandHandler("addadmin", agregar_admin))
-    application.add_handler(CommandHandler("deladmin", quitar_admin))
-    application.add_handler(CommandHandler("settings", settings_command))
-    
-    application.add_handler(CommandHandler("setbienvenida", menu_bienvenida))
-    application.add_handler(CallbackQueryHandler(callback_menu_bienvenida, pattern="^cfg_"))
-    application.add_handler(CallbackQueryHandler(settings_callback, pattern="^set_"))
-    application.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, manejar_captura_config))
-
-    application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.VIDEO, guardar_desde_canal))
-
-    application.add_handler(CallbackQueryHandler(mostrar_catalogo_peliculas, pattern="^cat_peliculas"))
-    application.add_handler(CallbackQueryHandler(mostrar_catalogo_series, pattern="^cat_series"))
-    application.add_handler(CallbackQueryHandler(mostrar_temporadas_serie, pattern="^seriestemp_"))
-    application.add_handler(CallbackQueryHandler(catalogo_volver_inicio, pattern="^catalogo_volver_inicio$"))
-
-    application.add_handler(CallbackQueryHandler(boton_idioma, pattern="^lang_"))
-    application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
-    application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
-    application.add_handler(CallbackQueryHandler(boton_ver_episodio, pattern="^(send_chat_|send_priv_)"))
-    application.add_handler(CallbackQueryHandler(boton_eliminar_pelicula, pattern="^(delpel_|delall_|delind_)"))
-    
-    application.add_error_handler(error_handler)
-
-    import asyncio
-    try:
-        asyncio.run(init_db())
-    except Exception as e:
-        logger.error(f"No se pudo inicializar la BD: {e}")
-
-    logger.info("Iniciando polling del bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    main()
+    user_id = update.
