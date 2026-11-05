@@ -86,16 +86,7 @@ async def ejecutar_turso_sql(statements: list) -> dict:
         return data
 
 async def init_db() -> None:
-    sql_peliculas = """
-        CREATE TABLE IF NOT EXISTS peliculas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT NOT NULL,
-            titulo TEXT NOT NULL,
-            file_id TEXT,
-            temporada TEXT DEFAULT 'General',
-            creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """
+    sql_peliculas = "CREATE TABLE IF NOT EXISTS peliculas (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL, titulo TEXT NOT NULL, file_id TEXT, temporada TEXT DEFAULT 'General', creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
     sql_admins = "CREATE TABLE IF NOT EXISTS admins (user_id TEXT PRIMARY KEY)"
     sql_config = "CREATE TABLE IF NOT EXISTS config (clave TEXT PRIMARY KEY, valor TEXT)"
     await ejecutar_turso_sql([sql_peliculas, sql_admins, sql_config])
