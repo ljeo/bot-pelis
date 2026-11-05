@@ -169,7 +169,13 @@ async def init_db() -> None:
             creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
-    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes])
+    sql_avisos_permisos = """
+        CREATE TABLE IF NOT EXISTS avisos_permisos (
+            chat_id TEXT PRIMARY KEY,
+            message_id INTEGER NOT NULL
+        )
+    """
+    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes, sql_avisos_permisos])
     try:
         await ejecutar_turso_sql(["ALTER TABLE solicitudes ADD COLUMN mensaje_id INTEGER"])
     except Exception as e:
@@ -227,6 +233,24 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
     )
 
     if puede_borrar:
+        # Si había un aviso pendiente, eliminarlo ahora que el bot ya puede borrar mensajes.
+        try:
+            chat_id_sql = str(cambio.chat.id)
+            resultado_aviso = await ejecutar_turso_sql([
+                f"SELECT message_id FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
+            ])
+            filas_aviso = resultado_aviso.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if filas_aviso:
+                mensaje_id = int(filas_aviso[0][0]["value"])
+                try:
+                    await context.bot.delete_message(chat_id=cambio.chat.id, message_id=mensaje_id)
+                except Exception as e_delete:
+                    logger.warning(f"No se pudo borrar el aviso de permisos en {cambio.chat.id}: {e_delete}")
+                await ejecutar_turso_sql([
+                    f"DELETE FROM avisos_permisos WHERE chat_id = '{chat_id_sql}'"
+                ])
+        except Exception as e_aviso:
+            logger.error(f"Error limpiando el aviso de permisos en {cambio.chat.id}: {e_aviso}", exc_info=True)
         return
 
     if estado in ("left", "kicked"):
@@ -241,11 +265,16 @@ async def revisar_permisos_grupo(update: Update, context: ContextTypes.DEFAULT_T
         "Las demás funciones disponibles seguirán dependiendo de sus permisos."
     )
     try:
-        await context.bot.send_message(
+        mensaje_aviso = await context.bot.send_message(
             chat_id=cambio.chat.id,
             text=texto,
             parse_mode="Markdown"
         )
+        chat_id_sql = str(cambio.chat.id)
+        await ejecutar_turso_sql([
+            "INSERT OR REPLACE INTO avisos_permisos (chat_id, message_id) "
+            f"VALUES ('{chat_id_sql}', {mensaje_aviso.message_id})"
+        ])
     except Exception as e:
         logger.warning(f"No se pudo avisar sobre permisos en el grupo {cambio.chat.id}: {e}")
 
