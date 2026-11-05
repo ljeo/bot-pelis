@@ -442,6 +442,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             await update.message.reply_text(texto_final, parse_mode="Markdown", reply_markup=reply_markup)
 
+def normalizar_mayusculas_titulo(texto: str) -> str:
+    """Deja el título en formato oración: primera letra mayúscula y resto minúscula."""
+    texto = (texto or "").strip()
+    if not texto:
+        return texto
+    # Mantener intactos los caracteres iniciales que no sean letras.
+    indice = next((i for i, caracter in enumerate(texto) if caracter.isalpha()), None)
+    if indice is None:
+        return texto
+    return texto[:indice] + texto[indice].upper() + texto[indice + 1:].lower()
+
+
 def limpiar_titulo_pelicula(caption: str) -> str:
     """Extrae el título principal de la primera línea y elimina adornos/duplicados."""
     lineas = [linea.strip() for linea in (caption or "").splitlines() if linea.strip()]
@@ -516,12 +528,13 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
 
-        # Para que el video al enviarse SEPA QUÉ CAPÍTULO ES, guardamos en el título del registro el nombre completo/capítulo
-        # Ej: Título registrado = "Prefiero la muerte (1x8)" o el raw_title completo
-        titulo_guardar = f"{titulo_limpio} ({raw_title})" if raw_title.lower() != titulo_limpio.lower() else raw_title
+        titulo_limpio = normalizar_mayusculas_titulo(titulo_limpio)
+        raw_title_limpio = normalizar_mayusculas_titulo(raw_title)
+        # Conservar el identificador del capítulo, pero normalizar el texto del título.
+        titulo_guardar = f"{titulo_limpio} ({raw_title_limpio})" if raw_title.lower() != titulo_limpio.lower() else titulo_limpio
     else:
         temporada = "General"
-        titulo_limpio = limpiar_titulo_pelicula(caption)
+        titulo_limpio = normalizar_mayusculas_titulo(limpiar_titulo_pelicula(caption))
         titulo_guardar = titulo_limpio
 
     try:
@@ -896,6 +909,7 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception:
         pass
 
+    texto_args = normalizar_mayusculas_titulo(texto_args)
     context.user_data["pending_file_id"] = file_id_subido
     context.user_data["pending_titulo"] = texto_args
 
