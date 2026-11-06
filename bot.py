@@ -2689,6 +2689,29 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
 
+        # La consulta SQL usa LIKE para acotar candidatos, pero no garantiza
+        # que el título coincida completo (por ejemplo, "it" aparece dentro
+        # de "Infinity"). Para películas exigimos coincidencia exacta de
+        # título normalizado y año antes de mostrar cualquier resultado.
+        if patron_pelicula and rows:
+            titulo_objetivo = re.sub(
+                r"[^a-z0-9]", "", normalizar_busqueda(titulo_solicitado)
+            )
+            anio_objetivo = patron_pelicula.group(2)
+            filas_exactas = []
+            for fila in rows:
+                if len(fila) <= 2 or "value" not in fila[2]:
+                    continue
+                titulo_fila = str(fila[2]["value"] or "")
+                anio_fila = extraer_anio_titulo(titulo_fila)
+                titulo_sin_anio = re.sub(r"\\b(?:19|20)\\d{2}\\b", "", titulo_fila)
+                titulo_normalizado = re.sub(
+                    r"[^a-z0-9]", "", normalizar_busqueda(titulo_sin_anio)
+                )
+                if anio_fila == anio_objetivo and titulo_normalizado == titulo_objetivo:
+                    filas_exactas.append(fila)
+            rows = filas_exactas
+
         if rows:
             keyboard = []
             titulos_vistos = set()
