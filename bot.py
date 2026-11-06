@@ -709,16 +709,16 @@ def limpiar_titulo_pelicula(caption: str) -> str:
     # Normalizar el año de estreno al final: "Título. (2026)" -> "Título 2026".
     # También admite [2026], {2026} y separadores repetidos antes del año.
     titulo = re.sub(
-        r"[\\s.·•:：_–—-]*[([{]\\s*(\\d{4})\\s*[)\\]}][.!?。，、]*$",
-        r" \\1",
+        r"[\s.·•:：_–—-]*[([{]\s*(\d{4})\s*[)\]}][.!?。，、]*$",
+        r" \1",
         titulo
     )
     titulo = re.sub(
-        r"[\\s.·•:：_–—-]+(\\d{4})[.!?。，、]*$",
-        r" \\1",
+        r"[\s.·•:：_–—-]+(\d{4})[.!?。，、]*$",
+        r" \1",
         titulo
     )
-    titulo = re.sub(r"\\s+", " ", titulo).strip(" .·•:：_–—-")
+    titulo = re.sub(r"\s+", " ", titulo).strip(" .·•:：_–—-")
     return titulo or "Sin Título"
 
 
@@ -804,7 +804,7 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         rows_check = res_check.get("results", [])[0]["response"].get("result", {}).get("rows", [])
         if rows_check:
             logger.info(f"Contenido duplicado omitido desde canal: {titulo_guardar} ({temporada}); revisando solicitudes pendientes")
-            titulo_para_notificar = re.sub(r"\\s+\\d{4}$", "", titulo_limpio).strip()
+            titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
             return
 
