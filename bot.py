@@ -1777,13 +1777,35 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
         return
     try:
         chat_id = str(update.effective_chat.id).replace("'", "''")
+        ids_busqueda = {chat_id}
+        try:
+            res_canal = await ejecutar_turso_sql([
+                "SELECT valor FROM config WHERE clave = 'catalogo_canal_id' LIMIT 1"
+            ])
+            filas_canal = res_canal.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if filas_canal and filas_canal[0][0].get("value"):
+                ids_busqueda.add(str(filas_canal[0][0]["value"]).replace("'", "''"))
+        except Exception as e_canal:
+            logger.info(f"No se pudo leer el canal compartido para /eliminar: {e_canal}")
+        filtro_chats = ", ".join(f"'{x}'" for x in sorted(ids_busqueda))
         resultado = await ejecutar_turso_sql([
-            f"SELECT id, titulo, temporada FROM peliculas WHERE chat_id = '{chat_id}' ORDER BY id ASC"
+            f"SELECT id, titulo, temporada, chat_id FROM peliculas WHERE chat_id IN ({filtro_chats}) ORDER BY id ASC"
         ])
         results_list = resultado.get("results", [])
         todas = results_list[0].get("response", {}).get("result", {}).get("rows", []) if results_list else []
         consulta = normalizar_busqueda(query_texto)
-        rows = [r for r in todas if len(r)>2 and consulta in normalizar_busqueda(str(r[1].get("value","")))]
+        clave_consulta = clave_serie_catalogo(query_texto)
+        rows = [
+            r for r in todas
+            if len(r) > 2 and (
+                consulta in normalizar_busqueda(str(r[1].get("value", "")))
+                or (
+                    str(r[2].get("value", "General")) != "General"
+                    and clave_consulta
+                    and clave_consulta == clave_serie_catalogo(str(r[1].get("value", "")))
+                )
+            )
+        ]
         rows.sort(key=lambda r: normalizar_busqueda(str(r[1].get("value",""))))
         ids_en_sagas, sagas = set(), {}
         try:
@@ -1812,7 +1834,7 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.setdefault("delete_queries",{})[token]=query_texto
         context.user_data.setdefault("delete_movie_ids",{})[token]=[int(r[0]["value"]) for r in peliculas if r[0].get("value") is not None]
         context.user_data.setdefault("delete_episode_records",{})[token]=[
-            {"id":int(r[0]["value"]),"titulo":str(r[1].get("value","")),"temporada":str(r[2].get("value",""))}
+            {"id":int(r[0]["value"]),"titulo":str(r[1].get("value","")),"temporada":str(r[2].get("value","")),"chat_id":str(r[3].get("value", chat_id)) if len(r)>3 else chat_id}
             for r in episodios if r[0].get("value") is not None
         ]
         while len(context.user_data["delete_queries"])>20:
@@ -1877,7 +1899,7 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada!='General'"])
             rows=res.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
             count=int(rows[0][0].get("value",0)) if rows else 0
-            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada!='General'"])
+            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
             await editar_o_enviar(query,f"✅ Serie eliminada.\n🗑️ Capítulos borrados: {count}")
         except Exception as e:
             logger.error(f"Error eliminando serie: {e}",exc_info=True)
@@ -1916,7 +1938,7 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada!='General'"])
             rows=res.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
             count=int(rows[0][0].get("value",0)) if rows else 0
-            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada!='General'"])
+            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
             await editar_o_enviar(query,f"✅ {selection['temporada']} eliminada.\n🗑️ Capítulos borrados: {count}")
         except Exception as e:
             logger.error(f"Error eliminando temporada: {e}",exc_info=True)
@@ -1949,7 +1971,7 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             if token not in queries or pid not in allowed:
                 await editar_o_enviar(query,"⚠️ La selección expiró o no corresponde a esta búsqueda.")
                 return
-            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id={pid} AND chat_id='{chat_id}' AND temporada!='General'"])
+            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id={pid} AND temporada!='General'"])
             await editar_o_enviar(query,"✅ ¡Capítulo eliminado de la base de datos!")
         except Exception as e:
             logger.error(f"Error eliminando capítulo: {e}",exc_info=True)
