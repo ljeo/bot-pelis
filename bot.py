@@ -664,7 +664,8 @@ def ordenar_episodios(rows):
         )
         if match:
             return (0, int(match.group(1) or match.group(3)), int(match.group(2) or match.group(4)))
-        return (1, 0, 0)
+        # Un registro antiguo sin marcador se considera el episodio 1 de T1.
+        return (0, 1, 1)
     return sorted(rows, key=clave)
 
 
