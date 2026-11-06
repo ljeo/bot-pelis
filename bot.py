@@ -1250,6 +1250,7 @@ async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_T
     if texto_msg.startswith("/"):
         context.user_data.pop("esperando_foto_bienvenida", None)
         context.user_data.pop("esperando_texto_bienvenida", None)
+        context.user_data.pop("esperando_nombre_saga", None)
         return
 
     if context.user_data.get("esperando_nombre_saga"):
@@ -1312,6 +1313,9 @@ async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_T
             res_dup = await ejecutar_turso_sql([sql_dup])
             rows_dup = res_dup.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if rows_dup:
+                context.user_data.pop("esperando_nombre_saga", None)
+                context.user_data.pop("pending_file_id", None)
+                context.user_data.pop("pending_titulo", None)
                 await update.message.reply_text("⚠️ Esta película o archivo ya está registrado. No se añadió a la saga.")
                 return
 
