@@ -1077,7 +1077,7 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
             "FROM sagas s "
             "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
             "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-            f"WHERE s.id = {saga_id} AND p.temporada = 'General'"
+            f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id AND p.temporada = 'General'"
         )
         resultado = await ejecutar_turso_sql([sql])
         filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
@@ -1133,7 +1133,7 @@ async def gestionar_envio_saga(update: Update, context: ContextTypes.DEFAULT_TYP
             saga_id = int(data[len("sagaenv_priv_"):])
         elif data.startswith("sagaenv_"):
             saga_id = int(data[len("sagaenv_"):])
-            sql_nombre = f"SELECT nombre FROM sagas WHERE id = {saga_id} LIMIT 1"
+            sql_nombre = f"SELECT nombre FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}' LIMIT 1"
             res_nombre = await ejecutar_turso_sql([sql_nombre])
             filas_nombre = res_nombre.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if not filas_nombre:
@@ -2072,6 +2072,7 @@ async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     data = query.data or ""
+    chat_id = str(query.message.chat_id).replace("'", "''")
 
     if not await es_admin(query.from_user.id):
         await editar_o_enviar(query, "⛔ No tienes permisos para realizar esta acción.")
@@ -2123,7 +2124,7 @@ async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAU
                 "SELECT s.nombre, p.titulo FROM sagas s "
                 "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
                 "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-                f"WHERE s.id = {saga_id} AND p.id = {pelicula_id} AND p.temporada = 'General' LIMIT 1"
+                f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.id = {pelicula_id} AND p.chat_id = s.chat_id AND p.temporada = 'General' LIMIT 1"
             ])
             filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if not filas:
@@ -2174,16 +2175,24 @@ async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAU
             res = await ejecutar_turso_sql([
                 "SELECT p.titulo FROM saga_peliculas sp "
                 "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-                f"WHERE sp.saga_id = {saga_id} AND p.id = {pelicula_id} AND p.temporada = 'General' LIMIT 1"
+                f"WHERE sp.saga_id = {saga_id} AND p.id = {pelicula_id} AND p.chat_id = '{chat_id}' AND p.temporada = 'General' AND EXISTS (SELECT 1 FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}') LIMIT 1"
             ])
             filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if not filas:
                 await editar_o_enviar(query, "⚠️ La película ya no está asociada a esta saga.")
                 return
+            res_trigger = await ejecutar_turso_sql(["SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_saga_peliculas_delete'"])
+            triggers = res_trigger.get("results", [])[0]["response"]["result"].get("rows", [])
+            if not triggers:
+                await editar_o_enviar(query, "⚠️ Falta aplicar la migración de seguridad de sagas. No se borró nada.")
+                return
             await ejecutar_turso_sql([
-                f"DELETE FROM saga_peliculas WHERE saga_id = {saga_id} AND pelicula_id = {pelicula_id}",
-                f"DELETE FROM peliculas WHERE id = {pelicula_id} AND temporada = 'General'",
-                f"DELETE FROM sagas WHERE id = {saga_id} AND NOT EXISTS (SELECT 1 FROM saga_peliculas WHERE saga_id = {saga_id})"
+                f"DELETE FROM peliculas WHERE id = {pelicula_id} AND chat_id = '{chat_id}' AND temporada = 'General' "
+                f"AND EXISTS (SELECT 1 FROM saga_peliculas WHERE saga_id = {saga_id} AND pelicula_id = {pelicula_id}) "
+                f"AND EXISTS (SELECT 1 FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}')"
+            ])
+            await ejecutar_turso_sql([
+                f"DELETE FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}' AND NOT EXISTS (SELECT 1 FROM saga_peliculas WHERE saga_id = {saga_id})"
             ])
             await editar_o_enviar(query, "✅ Película eliminada de la saga y del catálogo.")
             return
@@ -2197,11 +2206,17 @@ async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAU
             if not filas:
                 await editar_o_enviar(query, "⚠️ Esta saga ya no existe.")
                 return
+            res_trigger = await ejecutar_turso_sql(["SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_saga_peliculas_delete'"])
+            triggers = res_trigger.get("results", [])[0]["response"]["result"].get("rows", [])
+            if not triggers:
+                await editar_o_enviar(query, "⚠️ Falta aplicar la migración de seguridad de sagas. No se borró nada.")
+                return
             await ejecutar_turso_sql([
-                f"DELETE FROM peliculas WHERE id IN (SELECT pelicula_id FROM saga_peliculas WHERE saga_id = {saga_id}) AND temporada = 'General'",
-                f"DELETE FROM saga_peliculas WHERE saga_id = {saga_id}",
-                f"DELETE FROM sagas WHERE id = {saga_id}"
+                f"DELETE FROM peliculas WHERE chat_id = '{chat_id}' AND temporada = 'General' "
+                f"AND id IN (SELECT sp.pelicula_id FROM saga_peliculas sp INNER JOIN sagas s ON s.id = sp.saga_id "
+                f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}')"
             ])
+            await ejecutar_turso_sql([f"DELETE FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}'"])
             await editar_o_enviar(query, "✅ Saga completa eliminada del catálogo.")
             return
 
