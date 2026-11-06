@@ -618,11 +618,11 @@ def clave_serie_catalogo(titulo: str) -> str:
 
 def numero_temporada_catalogo(temporada: str, titulo: str = ""):
     """Obtiene el número de temporada; infiere el dato del marcador del episodio si falta."""
-    coincidencia = re.search(r"temporada\\s*(\\d+)", temporada or "", re.IGNORECASE)
+    coincidencia = re.search(r"temporada\s*(\d+)", temporada or "", re.IGNORECASE)
     if coincidencia:
         return int(coincidencia.group(1))
     coincidencia = re.search(
-        r"\\b(\\d{1,2})[xX]\\d{1,2}\\b|\\b[Ss](\\d{1,2})[Ee]\\d{1,2}\\b",
+        r"\b(\d{1,2})[xX]\d{1,2}\b|\b[Ss](\d{1,2})[Ee]\d{1,2}\b",
         titulo or ""
     )
     if coincidencia:
@@ -1233,7 +1233,7 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
             # Recupera episodios con marcador explícito aunque se hubieran guardado
             # inicialmente como "General" desde el guardado manual.
             es_episodio = bool(re.search(
-                r"\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[Ss]\\d{1,2}[Ee]\\d{1,2}\\b",
+                r"\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b",
                 titulo
             ))
             if temporada_registro == "General" and not es_episodio:
