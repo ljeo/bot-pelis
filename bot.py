@@ -434,16 +434,27 @@ async def obtener_idioma_usuario(user_id: int) -> str:
     return "es"
 
 async def enviar_bienvenida_grupo(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Envía y fija una sola vez por grupo la bienvenida configurada para /start."""
+    """Envía y fija la bienvenida configurada al convertirse el bot en administrador."""
     chat_id_sql = str(chat_id)
     try:
         resultado = await ejecutar_turso_sql([
             f"SELECT message_id FROM bienvenidas_grupos WHERE chat_id = '{chat_id_sql}'"
         ])
         filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+
+        # Si había una bienvenida anterior (por ejemplo, enviada antes de configurar
+        # la foto), se retira para sustituirla por la bienvenida actualmente configurada.
         if filas:
-            logger.info(f"La bienvenida del grupo {chat_id} ya fue enviada anteriormente.")
-            return
+            bienvenida_anterior_id = int(filas[0][0]["value"])
+            try:
+                await context.bot.delete_message(
+                    chat_id=chat_id,
+                    message_id=bienvenida_anterior_id
+                )
+            except Exception as e_delete:
+                logger.info(
+                    f"No se pudo retirar la bienvenida anterior en {chat_id}: {e_delete}"
+                )
 
         texto_final = TEXTO_BIENVENIDA_DEFAULT
         img_url = None
@@ -489,9 +500,8 @@ async def enviar_bienvenida_grupo(chat_id: int, context: ContextTypes.DEFAULT_TY
                 reply_markup=reply_markup
             )
 
-        # Registrar tras enviar para evitar duplicados en futuros cambios de permisos.
         await ejecutar_turso_sql([
-            "INSERT OR IGNORE INTO bienvenidas_grupos (chat_id, message_id) "
+            "INSERT OR REPLACE INTO bienvenidas_grupos (chat_id, message_id) "
             f"VALUES ('{chat_id_sql}', {mensaje.message_id})"
         ])
 
@@ -507,7 +517,6 @@ async def enviar_bienvenida_grupo(chat_id: int, context: ContextTypes.DEFAULT_TY
             )
     except Exception as e:
         logger.error(f"No se pudo enviar la bienvenida automática al grupo {chat_id}: {e}", exc_info=True)
-
 
 async def eliminar_aviso_fijado_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Borra el aviso de servicio 'X fijó una foto/mensaje' solo para la bienvenida del bot."""
