@@ -1304,6 +1304,8 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         if temporada == "General":
+            # Limpiar tambien las peliculas guardadas manualmente antes de insertarlas.
+            titulo_base = limpiar_titulo_pelicula(titulo_base)
             titulo_final = titulo_base
             temp_guardar = "General"
             
