@@ -726,8 +726,8 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         r"DVDRIP|X264|X265|HEVC|AAC|DUAL AUDIO|SUBTITULAD[AO]S?)"
     )
     patron_etiqueta_final = (
-        rf"(?:\\s*[\\[(\\{{]\\s*{etiqueta_tecnica}\\s*[\\])\\}}]\\s*"
-        rf"|\\s+[-–—]\\s*{etiqueta_tecnica}\\s*)+$"
+        rf"(?:\s*[\[(\{{]\s*{etiqueta_tecnica}\s*[\])\}}]\s*"
+        rf"|\s+[-–—]\s*{etiqueta_tecnica}\s*)+$"
     )
     titulo = re.sub(
         patron_etiqueta_final,
