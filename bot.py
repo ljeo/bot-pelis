@@ -678,8 +678,10 @@ def extraer_nombre_base_serie(titulo: str) -> str:
     nombre = (titulo or "").strip()
     if " (" in nombre:
         nombre = nombre.split(" (", 1)[0].strip()
+    # El marcador puede ir seguido de emojis o banderas (por ejemplo,
+    # "Merlina 1x1 🇲🇽"); también deben quitarse para agrupar la serie.
     nombre = re.sub(
-        r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)\s*$",
+        r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)(?:\s*[^\w\s]*)*\s*$",
         "",
         nombre
     ).strip()
@@ -1625,7 +1627,13 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 temporada = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else "General"
                 titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else query_texto
                 
-                nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
+                nombre_base = (
+                    titulo_encontrado.split(" (", 1)[0].strip()
+                    if " (" in titulo_encontrado
+                    else titulo_encontrado.strip()
+                )
+                if temporada != "General":
+                    nombre_base = extraer_nombre_base_serie(nombre_base)
                 clave_unica = f"{nombre_base.lower()}_{temporada.lower()}"
                 if clave_unica in titulos_vistos:
                     continue
