@@ -2035,10 +2035,19 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         titulo_sql = titulo_solicitado.replace("'", "''").lower()
         temporada_sql_busqueda = temporada_solicitada.replace("'", "''")
-        filtro_temporada = f" AND temporada = '{temporada_sql_busqueda}'" if patron_serie else ""
+        if patron_serie:
+            filtro_contenido = f" AND temporada = '{temporada_sql_busqueda}'"
+        else:
+            # Las películas deben coincidir también con el año solicitado;
+            # no basta con que compartan el nombre (ej. Spider-Man 2002 vs 2026).
+            anio_solicitado = patron_pelicula.group(2)
+            filtro_contenido = (
+                " AND temporada = 'General'"
+                f" AND titulo LIKE '%{anio_solicitado}%'"
+            )
         sql = (
             "SELECT id, temporada, titulo, file_id FROM peliculas "
-            f"WHERE LOWER(titulo) LIKE '%{titulo_sql}%'{filtro_temporada} "
+            f"WHERE LOWER(titulo) LIKE '%{titulo_sql}%'{filtro_contenido} "
             "ORDER BY id DESC LIMIT 50"
         )
         resultado = await ejecutar_turso_sql([sql])
