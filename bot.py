@@ -956,6 +956,12 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Error procesando canal_post: {e}", exc_info=True)
 
+def normalizar_busqueda(texto: str) -> str:
+    """Normaliza texto para búsquedas sin distinguir acentos ni mayúsculas."""
+    texto = unicodedata.normalize("NFD", str(texto).casefold())
+    return "".join(caracter for caracter in texto if unicodedata.category(caracter) != "Mn")
+
+
 async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -984,6 +990,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
                 continue
             vistos.add(titulo_clean.lower())
             titulos_unicos.append((id_registro, titulo_clean))
+        titulos_unicos.sort(key=lambda item: normalizar_busqueda(item[1]))
         total_items = len(titulos_unicos)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
         pagina = max(0, min(pagina, total_paginas - 1))
@@ -1040,6 +1047,7 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
                 continue
             vistos.add(clave)
             series_unicas.append((id_registro, nombre_base))
+        series_unicas.sort(key=lambda item: normalizar_busqueda(item[1]))
         total_items = len(series_unicas)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
         pagina = max(0, min(pagina, total_paginas - 1))
@@ -1751,12 +1759,11 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         patron_busqueda_serie = re.match(r"^(.*?)\s+(?:temporada|temp)\s*(\d+)\s*$", query_texto, re.IGNORECASE)
         titulo_consulta = patron_busqueda_serie.group(1).strip() if patron_busqueda_serie else query_texto
         temporada_filtro = f"Temporada {int(patron_busqueda_serie.group(2))}" if patron_busqueda_serie else None
-        query_escaped = titulo_consulta.replace("'", "''").lower()
+        query_normalizada = normalizar_busqueda(titulo_consulta)
         filtro_temporada = f" AND temporada = '{temporada_filtro}'" if temporada_filtro else ""
         sql = (
             "SELECT id, temporada, titulo FROM peliculas "
-            f"WHERE LOWER(titulo) LIKE '%{query_escaped}%'{filtro_temporada} "
-            "ORDER BY id DESC"
+            f"WHERE 1=1{filtro_temporada} ORDER BY id DESC"
         )
         resultado = await ejecutar_turso_sql([sql])
         
@@ -1777,6 +1784,12 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     rows = results_alt_list[0]["response"].get("result", {}).get("rows", [])
             except Exception:
                 pass
+
+        rows = [
+            row for row in rows
+            if len(row) > 2
+            and query_normalizada in normalizar_busqueda(str(row[2].get("value", "")))
+        ]
 
         if rows:
             keyboard = []
