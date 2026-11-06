@@ -678,7 +678,13 @@ def extraer_nombre_base_serie(titulo: str) -> str:
     nombre = (titulo or "").strip()
     if " (" in nombre:
         nombre = nombre.split(" (", 1)[0].strip()
-    # El marcador del episodio puede ir seguido de banderas/emojis del canal.
+    # Aceptar el marcador del episodio tanto al final como al principio del título.
+    # Algunos canales publican "Merlina 2x5" y otros "2x5 Merlina".
+    nombre = re.sub(
+        r"^\s*(?:\d{1,2}[xX]\d{1,2}|[Ss]\d{1,2}[Ee]\d{1,2})\s*",
+        "",
+        nombre
+    ).strip()
     nombre = re.sub(
         r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)(?:\s*[^\w\s]+)*\s*$",
         "",
@@ -706,6 +712,9 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         return "Sin Título"
 
     titulo = lineas[0]
+    # Quitar emojis y adornos al principio (por ejemplo: "🌟 • Título").
+    while titulo and unicodedata.category(titulo[0]).startswith(("S", "P")):
+        titulo = titulo[1:].lstrip()
     # Si hay dos títulos en idiomas distintos separados por ' / ', conservar el primero.
     titulo = re.split(r"\s+/\s+", titulo, maxsplit=1)[0].strip()
 
