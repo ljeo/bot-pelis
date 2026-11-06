@@ -790,7 +790,8 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         titulo_limpio = re.sub(
             r'(\b\d{1,2}[xX]\d{1,2}\b|\b[sS]\d{1,2}[eE]\d{1,2}\b|'
             r'\btemporada\s*\d*(?:\s*[xX]\s*\d+)?\b|'
-            r'\btemp\s*\d*\b|\bcap[íi]tulo\s*\d*\b|\bcap\s*\d*\b)',
+            r'\btemp\s*\d*\b|\bcap[íi]tulo\s*\d*\b|\bcap\s*\d*\b|'
+            r'\bepisodio\s*\d*\b)',
             '',
             raw_title,
             flags=re.IGNORECASE
