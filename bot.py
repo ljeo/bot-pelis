@@ -754,6 +754,29 @@ def clave_serie_catalogo(titulo: str) -> str:
     return "".join(c.lower() for c in nombre if c.isalnum())
 
 
+def titulo_capitulo_para_envio(titulo: str) -> str:
+    """Muestra el episodio sin paréntesis, aunque se almacene en formato canónico."""
+    return re.sub(
+        r"\\s*\\((\\d{1,2})[xX](\\d{1,2})\\)\\s*$",
+        lambda m: f" {int(m.group(1))}x{int(m.group(2)):02d}",
+        (titulo or "").strip()
+    )
+
+
+def ordenar_episodios(rows):
+    """Ordena episodios por temporada y número de capítulo, no por fecha de guardado."""
+    def clave(row):
+        titulo = str(row[1].get("value", "")) if len(row) > 1 else ""
+        match = re.search(
+            r"\\b(\\d{1,2})[xX](\\d{1,2})\\b|\\b[Ss](\\d{1,2})[Ee](\\d{1,2})\\b",
+            titulo
+        )
+        if match:
+            return (0, int(match.group(1) or match.group(3)), int(match.group(2) or match.group(4)))
+        return (1, 0, 0)
+    return sorted(rows, key=clave)
+
+
 def limpiar_titulo_pelicula(caption: str) -> str:
     """Extrae el título principal de la primera línea y elimina adornos/duplicados."""
     lineas = [linea.strip() for linea in (caption or "").splitlines() if linea.strip()]
@@ -1854,6 +1877,7 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
                     if len(row) > 1
                     and clave_serie_catalogo(str(row[1].get("value", ""))) == clave_buscada
                 ]
+                rows = ordenar_episodios(rows)
             if rows:
                 try:
                     await query.message.delete()
@@ -1864,7 +1888,7 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
                     file_id = str(row[0]["value"]) if len(row) > 0 and "value" in row[0] else None
                     nombre_cap = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else titulo_busqueda
                     if file_id and file_id != "None":
-                        await context.bot.send_video(chat_id=user_id, video=file_id, caption=f"📁 {nombre_cap}")
+                        await context.bot.send_video(chat_id=user_id, video=file_id, caption=f"📁 {titulo_capitulo_para_envio(nombre_cap)}")
             else:
                 await editar_o_enviar(query, "⚠️ Archivos no encontrados.")
         except Exception as e:
