@@ -1894,17 +1894,27 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
         todas = results_list[0].get("response", {}).get("result", {}).get("rows", []) if results_list else []
         consulta = normalizar_busqueda(query_texto)
         clave_consulta = clave_serie_catalogo(query_texto)
-        rows = [
-            r for r in todas
-            if len(r) > 2 and (
-                consulta in normalizar_busqueda(str(r[1].get("value", "")))
-                or (
-                    str(r[2].get("value", "General")) != "General"
-                    and clave_consulta
-                    and clave_consulta == clave_serie_catalogo(str(r[1].get("value", "")))
+        consulta_exacta = re.sub(r"[^a-z0-9]", "", consulta)
+        rows = []
+        for r in todas:
+            if len(r) <= 2:
+                continue
+            titulo_fila = str(r[1].get("value", "") or "")
+            temporada_fila = str(r[2].get("value", "General") or "General")
+            if temporada_fila != "General":
+                # Para series, compara el nombre base completo; evita que
+                # una búsqueda corta como "it" coincida dentro de otra serie.
+                coincide = bool(clave_consulta) and clave_consulta == clave_serie_catalogo(titulo_fila)
+            else:
+                # Para películas, compara el título completo ignorando el año
+                # y signos de puntuación, pero nunca fragmentos internos.
+                titulo_sin_anio = re.sub(r"\\b(?:19|20)\\d{2}\\b", "", titulo_fila)
+                titulo_exactamente = re.sub(
+                    r"[^a-z0-9]", "", normalizar_busqueda(titulo_sin_anio)
                 )
-            )
-        ]
+                coincide = bool(consulta_exacta) and consulta_exacta == titulo_exactamente
+            if coincide:
+                rows.append(r)
         rows.sort(key=lambda r: normalizar_busqueda(str(r[1].get("value",""))))
         ids_en_sagas, sagas = set(), {}
         try:
