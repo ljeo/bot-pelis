@@ -1983,7 +1983,9 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else texto_args
                 
                 nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
-                clave_unica = f"{nombre_base.lower()}_{temporada.lower()}"
+                # Agrupa todos los episodios en un único botón para la temporada completa.
+                nombre_base = re.sub(r"\\s*(?:\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[Ss]\\d{1,2}[Ee]\\d{1,2}\\b)(?:\\s*[^\\w\\s]+)*\\s*$", "", nombre_base).strip()
+                clave_unica = nombre_base.casefold() + "_" + temporada.casefold()
                 if clave_unica in titulos_vistos:
                     continue
                 titulos_vistos.add(clave_unica)
