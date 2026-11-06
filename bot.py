@@ -8,7 +8,7 @@ import unicodedata
 from html import escape
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -688,6 +688,13 @@ def extraer_nombre_base_serie(titulo: str) -> str:
     return re.sub(r"[^\w\s]", "", nombre, flags=re.UNICODE).strip()
 
 
+def clave_serie_catalogo(titulo: str) -> str:
+    """Clave comparable del nombre de una serie, sin numeración ni adornos."""
+    nombre = extraer_nombre_base_serie(titulo or "")
+    nombre = unicodedata.normalize("NFKD", nombre)
+    return "".join(c.lower() for c in nombre if c.isalnum())
+
+
 def limpiar_titulo_pelicula(caption: str) -> str:
     """Extrae el título principal de la primera línea y elimina adornos/duplicados."""
     lineas = [linea.strip() for linea in (caption or "").splitlines() if linea.strip()]
@@ -1015,7 +1022,20 @@ async def catalogo_volver_inicio(update: Update, context: ContextTypes.DEFAULT_T
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await editar_o_enviar(query, texto_final, reply_markup=reply_markup, parse_mode="Markdown")
+    if img_url and img_url != "None":
+        try:
+            await query.message.edit_media(
+                media=InputMediaPhoto(
+                    media=img_url,
+                    caption=texto_final,
+                    parse_mode="Markdown"
+                ),
+                reply_markup=reply_markup
+            )
+        except Exception:
+            await editar_o_enviar(query, texto_final, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        await editar_o_enviar(query, texto_final, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def menu_bienvenida(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.from_user:
@@ -1729,10 +1749,17 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
             if temporada == "General":
                 sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
             else:
-                sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}' ORDER BY id ASC"
+                sql = f"SELECT file_id, titulo FROM peliculas WHERE temporada = '{temp_escaped}' ORDER BY id ASC"
             resultado = await ejecutar_turso_sql([sql])
             results_list = resultado.get("results", [])
             rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
+            if temporada != "General":
+                clave_buscada = clave_serie_catalogo(titulo_busqueda)
+                rows = [
+                    row for row in rows
+                    if len(row) > 1
+                    and clave_serie_catalogo(str(row[1].get("value", ""))) == clave_buscada
+                ]
             if rows:
                 try:
                     await query.message.delete()
@@ -1817,10 +1844,17 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if temporada == "General":
             sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
         else:
-            sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{titulo_escaped}%' AND temporada = '{temp_escaped}' ORDER BY id ASC"
+            sql = f"SELECT file_id, titulo FROM peliculas WHERE temporada = '{temp_escaped}' ORDER BY id ASC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
+        if temporada != "General":
+            clave_buscada = clave_serie_catalogo(titulo_busqueda)
+            rows = [
+                row for row in rows
+                if len(row) > 1
+                and clave_serie_catalogo(str(row[1].get("value", ""))) == clave_buscada
+            ]
         if temporada != "General" and rows:
             def clave_orden_capitulo(row):
                 titulo_capitulo = str(row[1].get("value", "")) if len(row) > 1 else ""
