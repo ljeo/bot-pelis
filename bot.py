@@ -725,13 +725,18 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e_config:
         logger.error(f"No se pudo registrar el canal del catálogo: {e_config}", exc_info=True)
 
-    # Expresión regular para detectar formatos de serie: 1x01, S01E01, Temporada X, Temp 1, Cap 1, etc.
+    # Detectar series únicamente por un marcador de episodio explícito
+    # en la primera línea (título). No analizar la descripción completa:
+    # podría mencionar "capítulo", "temporada" u otras series por contexto.
+    # Exigir número después de temporada/temp/cap/episodio evita falsos positivos.
     series_pattern = re.compile(
-        r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*(\d+)\b|\btemp\b|\bcap[íi]tulo\b|\bcap\b|\bepisodio\b)',
+        r'(\b\d{1,2}[xX]\d{1,2}\b|\b[sS]\d{1,2}[eE]\d{1,2}\b|'
+        r'\btemporada\s*\d+\b|\btemp\s*\d+\b|'
+        r'\bcap[íi]tulo\s*\d+\b|\bcap\s*\d+\b|\bepisodio\s*\d+\b)',
         re.IGNORECASE
     )
-    
-    match = series_pattern.search(caption)
+
+    match = series_pattern.search(raw_title)
     
     if match:
         group_match = match.group(0)
