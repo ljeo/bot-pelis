@@ -714,6 +714,16 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     file_id = message.video.file_id
     chat_id = str(message.chat_id)
 
+    # Recordar el canal que alimenta el catálogo compartido. La tabla config
+    # ya existe; no requiere migraciones ni altera los registros guardados.
+    try:
+        chat_id_config = chat_id.replace("'", "''")
+        await ejecutar_turso_sql([
+            "INSERT OR REPLACE INTO config (clave, valor) "
+            f"VALUES ('catalogo_canal_id', '{chat_id_config}')"
+        ])
+    except Exception as e_config:
+        logger.error(f"No se pudo registrar el canal del catálogo: {e_config}", exc_info=True)
 
     # Expresión regular para detectar formatos de serie: 1x01, S01E01, Temporada X, Temp 1, Cap 1, etc.
     series_pattern = re.compile(
@@ -833,7 +843,28 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
             pagina = 0
     ITEMS_POR_PAGINA = 8
     try:
-        sql = f"SELECT id, titulo FROM peliculas WHERE chat_id = '{chat_id}' ORDER BY id DESC"
+        # Las publicaciones automáticas se guardan con el ID del canal.
+        # Se combina ese catálogo compartido con las entradas locales del chat,
+        # sin mezclar las sagas creadas en otros grupos.
+        canal_id = ""
+        try:
+            res_canal = await ejecutar_turso_sql([
+                "SELECT valor FROM config WHERE clave = 'catalogo_canal_id' LIMIT 1"
+            ])
+            filas_canal = res_canal.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if filas_canal and filas_canal[0][0].get("value"):
+                canal_id = str(filas_canal[0][0]["value"]).replace("'", "''")
+        except Exception as e_canal:
+            logger.info(f"No se pudo leer el canal del catálogo compartido: {e_canal}")
+
+        ids_catalogo = {chat_id}
+        if canal_id:
+            ids_catalogo.add(canal_id)
+        filtro_chats = ", ".join(f"'{id_chat}'" for id_chat in sorted(ids_catalogo))
+        sql = (
+            "SELECT id, titulo FROM peliculas "
+            f"WHERE chat_id IN ({filtro_chats}) ORDER BY id DESC"
+        )
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
