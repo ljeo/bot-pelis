@@ -2089,7 +2089,7 @@ async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAU
                 "FROM sagas s "
                 "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
                 "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-                f"WHERE s.id = {saga_id} AND p.temporada = 'General'"
+                f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id AND p.temporada = 'General'"
             ])
             filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if not filas:
@@ -2150,7 +2150,7 @@ async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAU
         if data.startswith("sagadel_confirm_all_"):
             saga_id = int(data[len("sagadel_confirm_all_"):])
             res = await ejecutar_turso_sql([
-                f"SELECT nombre FROM sagas WHERE id = {saga_id} LIMIT 1"
+                f"SELECT nombre FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}' LIMIT 1"
             ])
             filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if not filas:
