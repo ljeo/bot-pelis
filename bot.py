@@ -1550,15 +1550,19 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
         return
 
     try:
-        # LOWER() en ambos lados hace que la búsqueda no distinga mayúsculas/minúsculas.
-        query_escaped = query_texto.replace("'", "''").lower()
-        sql = (
-            "SELECT id, titulo, temporada FROM peliculas "
-            f"WHERE LOWER(titulo) LIKE '%{query_escaped}%' ORDER BY id ASC"
-        )
-        resultado = await ejecutar_turso_sql([sql])
+        # Se compara en Python para que /eliminar también ignore tildes.
+        resultado = await ejecutar_turso_sql([
+            "SELECT id, titulo, temporada FROM peliculas ORDER BY id ASC"
+        ])
         results_list = resultado.get("results", [])
-        rows = results_list[0].get("response", {}).get("result", {}).get("rows", []) if results_list else []
+        todas_las_filas = results_list[0].get("response", {}).get("result", {}).get("rows", []) if results_list else []
+        consulta_normalizada = normalizar_busqueda(query_texto)
+        rows = [
+            fila for fila in todas_las_filas
+            if len(fila) > 2
+            and consulta_normalizada in normalizar_busqueda(str(fila[1].get("value", "")))
+        ]
+        rows.sort(key=lambda fila: normalizar_busqueda(str(fila[1].get("value", ""))))
 
         if not rows:
             await update.message.reply_text(
@@ -1783,21 +1787,12 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
 
-        if not rows and not temporada_filtro:
-            sql_alt = f"SELECT id, temporada, titulo FROM peliculas WHERE LOWER(titulo) LIKE '%{query_escaped}%' ORDER BY id DESC"
-            resultado_alt = await ejecutar_turso_sql([sql_alt])
-            try:
-                results_alt_list = resultado_alt.get("results", [])
-                if results_alt_list and "response" in results_alt_list[0]:
-                    rows = results_alt_list[0]["response"].get("result", {}).get("rows", [])
-            except Exception:
-                pass
-
         rows = [
             row for row in rows
             if len(row) > 2
             and query_normalizada in normalizar_busqueda(str(row[2].get("value", "")))
         ]
+        rows.sort(key=lambda row: normalizar_busqueda(str(row[2].get("value", ""))))
 
         if rows:
             keyboard = []
