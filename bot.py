@@ -845,6 +845,15 @@ def limpiar_titulo_pelicula(caption: str) -> str:
     return titulo or "Sin Título"
 
 
+def titulo_para_boton_pelicula(titulo: str) -> str:
+    """Muestra el año una sola vez y entre paréntesis en los botones de películas."""
+    titulo = (titulo or "").strip()
+    coincidencia = re.match(r"^(.*?)\\s+(\\d{4})(?:\\s*\\(\\s*\\2\\s*\\))?$", titulo)
+    if coincidencia and coincidencia.group(1).strip():
+        return f"{coincidencia.group(1).strip()} ({coincidencia.group(2)})"
+    return titulo
+
+
 # INGESTA AUTOMÁTICA DESDE CANAL MEJORADA
 async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.channel_post
@@ -991,7 +1000,8 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         items_pagina = titulos_unicos[inicio:inicio + ITEMS_POR_PAGINA]
         keyboard = []
         for id_registro, titulo_clean in items_pagina:
-            keyboard.append([InlineKeyboardButton(titulo_clean, callback_data=f"seltemp_id_{id_registro}_General")])
+            titulo_boton = titulo_para_boton_pelicula(titulo_clean)
+            keyboard.append([InlineKeyboardButton(titulo_boton, callback_data=f"seltemp_id_{id_registro}_General")])
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_peliculas_p_{pagina - 1}"))
@@ -1816,7 +1826,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if not id_registro:
                     continue
                 if temporada == "General":
-                    button_text = f"🎬 {titulo_encontrado}"
+                    button_text = f"🎬 {titulo_para_boton_pelicula(titulo_encontrado)}"
                 else:
                     button_text = f"📺 {nombre_base} - {temporada}"
                 callback_data = f"seltemp_id_{id_registro}_{temporada}"
