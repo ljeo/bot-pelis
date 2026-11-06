@@ -962,6 +962,11 @@ def normalizar_busqueda(texto: str) -> str:
     return "".join(caracter for caracter in texto if unicodedata.category(caracter) != "Mn")
 
 
+def extraer_anio_titulo(titulo: str) -> str:
+    coincidencia = re.search(r"\b(?:19|20)\d{2}\b", str(titulo or ""))
+    return coincidencia.group(0) if coincidencia else ""
+
+
 async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -998,7 +1003,9 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         items_pagina = titulos_unicos[inicio:inicio + ITEMS_POR_PAGINA]
         keyboard = []
         for id_registro, titulo_clean in items_pagina:
-            keyboard.append([InlineKeyboardButton(titulo_clean, callback_data=f"seltemp_id_{id_registro}_General")])
+            anio = extraer_anio_titulo(titulo_clean)
+            etiqueta = f"{titulo_clean} ({anio})" if anio and f"({anio})" not in titulo_clean else titulo_clean
+            keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{id_registro}_General")])
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_peliculas_p_{pagina - 1}"))
@@ -1046,7 +1053,7 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
             if not nombre_base or not clave or clave in vistos:
                 continue
             vistos.add(clave)
-            series_unicas.append((id_registro, nombre_base))
+            series_unicas.append((id_registro, nombre_base, extraer_anio_titulo(titulo)))
         series_unicas.sort(key=lambda item: normalizar_busqueda(item[1]))
         total_items = len(series_unicas)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
@@ -1054,8 +1061,9 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
         inicio = pagina * ITEMS_POR_PAGINA
         items_pagina = series_unicas[inicio:inicio + ITEMS_POR_PAGINA]
         keyboard = []
-        for id_registro, nombre_base in items_pagina:
-            keyboard.append([InlineKeyboardButton(f"📺 {nombre_base}", callback_data=f"seriestemp_id_{id_registro}")])
+        for id_registro, nombre_base, anio in items_pagina:
+            etiqueta = f"📺 {nombre_base} ({anio})" if anio and f"({anio})" not in nombre_base else f"📺 {nombre_base}"
+            keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seriestemp_id_{id_registro}")])
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_series_p_{pagina - 1}"))
