@@ -757,7 +757,7 @@ def clave_serie_catalogo(titulo: str) -> str:
 def titulo_capitulo_para_envio(titulo: str) -> str:
     """Muestra el episodio sin paréntesis, aunque se almacene en formato canónico."""
     return re.sub(
-        r"\\s*\\((\\d{1,2})[xX](\\d{1,2})\\)\\s*$",
+        r"\s*\((\d{1,2})[xX](\d{1,2})\)\s*$",
         lambda m: f" {int(m.group(1))}x{int(m.group(2)):02d}",
         (titulo or "").strip()
     )
@@ -768,7 +768,7 @@ def ordenar_episodios(rows):
     def clave(row):
         titulo = str(row[1].get("value", "")) if len(row) > 1 else ""
         match = re.search(
-            r"\\b(\\d{1,2})[xX](\\d{1,2})\\b|\\b[Ss](\\d{1,2})[Ee](\\d{1,2})\\b",
+            r"\b(\d{1,2})[xX](\d{1,2})\b|\b[Ss](\d{1,2})[Ee](\d{1,2})\b",
             titulo
         )
         if match:
