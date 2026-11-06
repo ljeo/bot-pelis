@@ -816,9 +816,21 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
         titulo_limpio = normalizar_mayusculas_titulo(titulo_limpio)
-        # Guardar el nombre tal como viene en el canal, normalizado, sin repetir
-        # el título base entre paréntesis (por ejemplo: "Euphoria 1x1").
-        titulo_guardar = normalizar_mayusculas_titulo(raw_title)
+
+        # Guardar todos los episodios del canal con un formato uniforme.
+        # Así "Serie 1x05", "S01E05 Serie" y variantes quedan bajo la misma
+        # clave de serie, y el envío de temporada puede reunir todos sus archivos.
+        marcador_episodio = re.search(
+            r"\b(?:(\d{1,2})[xX](\d{1,2})|[Ss](\d{1,2})[Ee](\d{1,2}))\b",
+            raw_title,
+            re.IGNORECASE
+        )
+        if marcador_episodio:
+            temporada_num = int(marcador_episodio.group(1) or marcador_episodio.group(3))
+            episodio_num = int(marcador_episodio.group(2) or marcador_episodio.group(4))
+            titulo_guardar = f"{titulo_limpio} ({temporada_num}x{episodio_num:02d})"
+        else:
+            titulo_guardar = titulo_limpio
     else:
         temporada = "General"
         titulo_limpio = normalizar_mayusculas_titulo(limpiar_titulo_pelicula(caption))
