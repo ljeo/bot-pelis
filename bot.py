@@ -377,7 +377,7 @@ async def init_db() -> None:
                 if not clave_base.startswith("chespirito"):
                     continue
                 marcador = re.search(
-                    r"\\b(?:(\\d{1,2})[xX](\\d{1,2})|[Ss](\\d{1,2})[Ee](\\d{1,2}))\\b",
+                    r"\b(?:(\d{1,2})[xX](\d{1,2})|[Ss](\d{1,2})[Ee](\d{1,2}))\b",
                     titulo_actual,
                     re.IGNORECASE
                 )
