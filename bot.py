@@ -846,15 +846,17 @@ def limpiar_titulo_pelicula(caption: str) -> str:
 
 
 def titulo_para_boton_pelicula(titulo: str) -> str:
-    """Muestra el año sin paréntesis en los botones de películas."""
+    """Muestra el año una sola vez y sin paréntesis en los botones."""
     titulo = (titulo or "").strip()
-    # Quita los paréntesis del año final y evita mostrarlo duplicado.
-    coincidencia = re.match(r"^(.*?)\s+(\d{4})(?:\s*\(\s*\2\s*\))?$", titulo)
-    if coincidencia and coincidencia.group(1).strip():
-        return f"{coincidencia.group(1).strip()} {coincidencia.group(2)}"
-    coincidencia = re.match(r"^(.*?)\s*\(\s*(\d{4})\s*\)$", titulo)
-    if coincidencia and coincidencia.group(1).strip():
-        return f"{coincidencia.group(1).strip()} {coincidencia.group(2)}"
+    # Si termina en "(AAAA)", conserva el año y elimina solo esos paréntesis.
+    coincidencia = re.search(r"\s*\((\d{4})\)\s*$", titulo)
+    if coincidencia:
+        titulo_sin_parentesis = titulo[:coincidencia.start()].rstrip()
+        anio = coincidencia.group(1)
+        if re.search(rf"\b{anio}$", titulo_sin_parentesis):
+            return titulo_sin_parentesis
+        if titulo_sin_parentesis:
+            return f"{titulo_sin_parentesis} {anio}"
     return titulo
 
 
