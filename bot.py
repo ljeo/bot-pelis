@@ -767,8 +767,9 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         ).strip()
         # Algunos canales anteponen "ve" al nombre y escriben "temporada 1x2".
         # Ambos elementos son metadatos, no parte del título de la serie.
-        titulo_limpio = re.sub(r'^ve\s+', '', titulo_limpio, flags=re.IGNORECASE).strip()
-        titulo_limpio = re.sub(r'\\s+temporada\\s*
+        titulo_limpio = re.sub(r'\s+temporada\s*$', '', titulo_limpio, flags=re.IGNORECASE).strip()
+        if not titulo_limpio or not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", titulo_limpio):
+            logger.warning(        titulo_limpio = re.sub(r'\\s+temporada\\s*
                 f"Capítulo omitido: no se detectó el nombre de la serie en el caption: {caption!r}"
             )
             return
