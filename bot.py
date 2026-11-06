@@ -132,6 +132,62 @@ async def ejecutar_turso_sql(statements: list) -> dict:
                 raise Exception(f"Error SQL en Turso: {err_msg}")
         return data
 
+async def ejecutar_turso_batch_atomico(statements: list) -> dict:
+    """Ejecuta escrituras relacionadas en una única transacción atómica de Turso."""
+    if not statements:
+        raise ValueError("La transacción necesita al menos una sentencia.")
+
+    steps = [{"stmt": {"sql": "BEGIN"}}]
+    for index, sql in enumerate(statements, start=1):
+        steps.append({
+            "condition": {"type": "ok", "step": index - 1},
+            "stmt": {"sql": sql}
+        })
+
+    indice_commit = len(steps)
+    steps.append({
+        "condition": {
+            "type": "and",
+            "conds": [{"type": "ok", "step": i} for i in range(indice_commit)]
+        },
+        "stmt": {"sql": "COMMIT"}
+    })
+    steps.append({
+        "condition": {"type": "error", "step": indice_commit},
+        "stmt": {"sql": "ROLLBACK"}
+    })
+
+    url = get_turso_rest_url()
+    headers = {
+        "Authorization": f"Bearer {TURSO_AUTH_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "requests": [
+            {"type": "batch", "batch": {"steps": steps}},
+            {"type": "close"}
+        ]
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(url, json=payload, headers=headers)
+        if response.status_code != 200:
+            logger.error(f"Turso batch HTTP error: {response.text}")
+            raise Exception(f"Turso API error HTTP {response.status_code}: {response.text}")
+
+        data = response.json()
+        resultados = data.get("results", [])
+        if not resultados or resultados[0].get("type") != "ok":
+            raise Exception(f"Falló la transacción de Turso: {resultados}")
+
+        resultado_batch = resultados[0].get("response", {}).get("result", {})
+        errores = resultado_batch.get("step_errors", [])
+        errores_reales = [error for error in errores if error]
+        if errores_reales:
+            raise Exception(f"Error dentro de la transacción de Turso: {errores_reales}")
+        if not resultado_batch.get("step_results"):
+            raise Exception("Turso no devolvió resultados de la transacción.")
+        return data
+
 async def init_db() -> None:
     sql_peliculas = """
         CREATE TABLE IF NOT EXISTS peliculas (
@@ -1549,15 +1605,13 @@ async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_T
                 f"AND p.chat_id = '{chat_escaped}' "
                 "ORDER BY p.id DESC LIMIT 1"
             )
-            await ejecutar_turso_sql([
-                "BEGIN",
+            await ejecutar_turso_batch_atomico([
                 sql_crear_saga_si_falta,
                 (
                     "INSERT INTO peliculas (chat_id, titulo, file_id, temporada) "
                     f"VALUES ('{chat_escaped}', '{titulo_escaped}', '{file_id_escaped}', 'General')"
                 ),
-                sql_insertar_relacion,
-                "COMMIT"
+                sql_insertar_relacion
             ])
 
             context.user_data.pop("esperando_nombre_saga", None)
