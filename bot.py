@@ -1056,7 +1056,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         keyboard.append([InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         if items_pagina:
-            texto_encabezado = f"🎬 **Películas y sagas registradas** (Pág. {pagina + 1}/{total_paginas}):\\n\\nSelecciona una película o una saga:"
+            texto_encabezado = f"🎬 **Películas y sagas registradas** (Pág. {pagina + 1}/{total_paginas}):\n\nSelecciona una película o una saga:"
             await editar_o_enviar(query, texto_encabezado, reply_markup=reply_markup, parse_mode="Markdown")
         else:
             await editar_o_enviar(query, "⚠️ No hay películas registradas todavía.", reply_markup=reply_markup)
@@ -1110,7 +1110,7 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
         keyboard.append([InlineKeyboardButton("🔙 Volver a Películas", callback_data="cat_peliculas")])
         await editar_o_enviar(
             query,
-            f"🎞️ **{nombre_saga} (Saga)**\\n\\nPelículas en orden cronológico:",
+            f"🎞️ **{nombre_saga} (Saga)**\n\nPelículas en orden cronológico:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
