@@ -1516,24 +1516,7 @@ async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_T
             file_id_escaped = file_id.replace("'", "''")
             chat_escaped = chat_id.replace("'", "''")
 
-            sql_saga = (
-                f"SELECT id FROM sagas WHERE chat_id = '{chat_escaped}' "
-                f"AND LOWER(nombre) = LOWER('{saga_escaped}')"
-            )
-            res_saga = await ejecutar_turso_sql([sql_saga])
-            rows_saga = res_saga.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            if rows_saga:
-                saga_id = str(rows_saga[0][0].get("value"))
-            else:
-                await ejecutar_turso_sql([
-                    f"INSERT INTO sagas (chat_id, nombre) VALUES ('{chat_escaped}', '{saga_escaped}')"
-                ])
-                res_saga = await ejecutar_turso_sql([sql_saga])
-                rows_saga = res_saga.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-                if not rows_saga:
-                    raise RuntimeError("No se pudo recuperar la saga recién creada.")
-                saga_id = str(rows_saga[0][0].get("value"))
-
+            # Comprobar duplicados ANTES de crear la saga para no dejar sagas vacías.
             sql_dup = (
                 f"SELECT id FROM peliculas WHERE file_id = '{file_id_escaped}' "
                 f"OR (LOWER(titulo) = LOWER('{titulo_escaped}') AND temporada = 'General')"
@@ -1547,19 +1530,34 @@ async def manejar_captura_config(update: Update, context: ContextTypes.DEFAULT_T
                 await update.message.reply_text("⚠️ Esta película o archivo ya está registrado. No se añadió a la saga.")
                 return
 
+            # Las tres escrituras se ejecutan en una transacción del mismo pipeline
+            # de Turso: si falla la relación, tampoco queda guardada la película.
+            sql_crear_saga_si_falta = (
+                "INSERT INTO sagas (chat_id, nombre) "
+                f"SELECT '{chat_escaped}', '{saga_escaped}' "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM sagas "
+                f"WHERE chat_id = '{chat_escaped}' AND LOWER(nombre) = LOWER('{saga_escaped}')"
+                ")"
+            )
+            sql_insertar_relacion = (
+                "INSERT INTO saga_peliculas (saga_id, pelicula_id) "
+                "SELECT s.id, p.id FROM sagas s "
+                "JOIN peliculas p ON p.file_id = '" + file_id_escaped + "' "
+                f"WHERE s.chat_id = '{chat_escaped}' "
+                f"AND LOWER(s.nombre) = LOWER('{saga_escaped}') "
+                f"AND p.chat_id = '{chat_escaped}' "
+                "ORDER BY p.id DESC LIMIT 1"
+            )
             await ejecutar_turso_sql([
-                f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) "
-                f"VALUES ('{chat_escaped}', '{titulo_escaped}', '{file_id_escaped}', 'General')"
-            ])
-            res_pelicula = await ejecutar_turso_sql([
-                f"SELECT id FROM peliculas WHERE file_id = '{file_id_escaped}' ORDER BY id DESC LIMIT 1"
-            ])
-            rows_pelicula = res_pelicula.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            if not rows_pelicula:
-                raise RuntimeError("No se pudo recuperar la película guardada.")
-            pelicula_id = str(rows_pelicula[0][0].get("value"))
-            await ejecutar_turso_sql([
-                f"INSERT INTO saga_peliculas (saga_id, pelicula_id) VALUES ({int(saga_id)}, {int(pelicula_id)})"
+                "BEGIN",
+                sql_crear_saga_si_falta,
+                (
+                    "INSERT INTO peliculas (chat_id, titulo, file_id, temporada) "
+                    f"VALUES ('{chat_escaped}', '{titulo_escaped}', '{file_id_escaped}', 'General')"
+                ),
+                sql_insertar_relacion,
+                "COMMIT"
             ])
 
             context.user_data.pop("esperando_nombre_saga", None)
