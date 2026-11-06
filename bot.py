@@ -848,7 +848,7 @@ def limpiar_titulo_pelicula(caption: str) -> str:
 def titulo_para_boton_pelicula(titulo: str) -> str:
     """Muestra el año una sola vez y entre paréntesis en los botones de películas."""
     titulo = (titulo or "").strip()
-    coincidencia = re.match(r"^(.*?)\\s+(\\d{4})(?:\\s*\\(\\s*\\2\\s*\\))?$", titulo)
+    coincidencia = re.match(r"^(.*?)\s+(\d{4})(?:\s*\(\s*\2\s*\))?$", titulo)
     if coincidencia and coincidencia.group(1).strip():
         return f"{coincidencia.group(1).strip()} ({coincidencia.group(2)})"
     return titulo
