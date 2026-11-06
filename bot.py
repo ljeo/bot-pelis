@@ -800,9 +800,24 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         res_file = await ejecutar_turso_sql([sql_check_file])
         rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows", [])
         if rows_file:
-            titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
+            # Si el mismo vídeo ya entró con un título mal interpretado, corregir
+            # su ficha usando el marcador explícito del caption actual.
+            if temporada != "General":
+                titulo_escaped = titulo_guardar.replace("'", "''")
+                temp_escaped = temporada.replace("'", "''")
+                chat_escaped = chat_id.replace("'", "''")
+                file_escaped = file_id.replace("'", "''")
+                await ejecutar_turso_sql([
+                    "UPDATE peliculas SET "
+                    f"titulo = '{titulo_escaped}', temporada = '{temp_escaped}', "
+                    f"chat_id = '{chat_escaped}' WHERE file_id = '{file_escaped}'"
+                ])
+                logger.info(
+                    f"Ficha de episodio existente normalizada desde el canal: "
+                    f"{titulo_guardar} - {temporada}"
+                )
+            titulo_para_notificar = re.sub(r"\\s+\\d{4}$", "", titulo_limpio).strip()
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
-            logger.info(f"Archivo ya registrado; se revisaron solicitudes pendientes: {raw_title}")
             return
     except Exception as e_file:
         logger.error(f"Error comprobando archivo duplicado desde canal: {e_file}", exc_info=True)
