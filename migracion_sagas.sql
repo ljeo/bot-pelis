@@ -21,3 +21,12 @@ CREATE INDEX IF NOT EXISTS idx_saga_peliculas_saga_id
 
 CREATE INDEX IF NOT EXISTS idx_sagas_chat_id
     ON sagas (chat_id);
+
+
+-- Elimina la relación con la saga en la misma operación que borra una película.
+-- Esto evita que queden asociaciones huérfanas si una operación posterior falla.
+CREATE TRIGGER IF NOT EXISTS trg_saga_peliculas_delete
+AFTER DELETE ON peliculas
+BEGIN
+    DELETE FROM saga_peliculas WHERE pelicula_id = OLD.id;
+END;
