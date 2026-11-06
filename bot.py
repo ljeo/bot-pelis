@@ -816,7 +816,8 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
                     f"Ficha de episodio existente normalizada desde el canal: "
                     f"{titulo_guardar} - {temporada}"
                 )
-            titulo_para_notificar = re.sub(r"\\s+\\d{4}$", "", titulo_limpio).strip()
+            titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
+            logger.info(f"Archivo ya registrado; se revisaron solicitudes pendientes: {raw_title}")
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
             return
     except Exception as e_file:
