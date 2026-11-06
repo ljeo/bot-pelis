@@ -846,11 +846,16 @@ def limpiar_titulo_pelicula(caption: str) -> str:
 
 
 def titulo_para_boton_pelicula(titulo: str) -> str:
-    """Oculta el año en los botones de películas sin modificar el título guardado."""
+    """Muestra el año sin paréntesis en los botones de películas."""
     titulo = (titulo or "").strip()
-    # Elimina años finales tanto con paréntesis como sin ellos, incluso si están duplicados.
-    titulo = re.sub(r"(?:\s+\d{4}|\s*\(\s*\d{4}\s*\))+$", "", titulo)
-    return titulo.strip()
+    # Quita los paréntesis del año final y evita mostrarlo duplicado.
+    coincidencia = re.match(r"^(.*?)\s+(\d{4})(?:\s*\(\s*\2\s*\))?$", titulo)
+    if coincidencia and coincidencia.group(1).strip():
+        return f"{coincidencia.group(1).strip()} {coincidencia.group(2)}"
+    coincidencia = re.match(r"^(.*?)\s*\(\s*(\d{4})\s*\)$", titulo)
+    if coincidencia and coincidencia.group(1).strip():
+        return f"{coincidencia.group(1).strip()} {coincidencia.group(2)}"
+    return titulo
 
 
 # INGESTA AUTOMÁTICA DESDE CANAL MEJORADA
