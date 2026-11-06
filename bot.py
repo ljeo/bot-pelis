@@ -741,7 +741,11 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         r" \1",
         titulo
     )
-    titulo = re.sub(r"\s+", " ", titulo).strip(" .·•:：_–—-")
+    # El nombre guardado debe contener solo palabras y año: convertir cualquier
+    # puntuación, paréntesis, guion o símbolo restante en espacios.
+    titulo = re.sub(r"[^\w\s]", " ", titulo, flags=re.UNICODE)
+    titulo = titulo.replace("_", " ")
+    titulo = re.sub(r"\s+", " ", titulo).strip()
     return titulo or "Sin Título"
 
 
