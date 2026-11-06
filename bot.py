@@ -924,13 +924,11 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
             titulo = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else ""
             if not id_registro or not titulo:
                 continue
-            nombre_base = titulo.split(" (")[0].strip() if " (" in titulo else titulo.strip()
-            nombre_base = re.sub(r'(\b(\d{1,2})[xX](\d{1,2})\b|\b[sS](\d{1,2})[eE](\d{1,2})\b|\btemporada\s*\d*\b|\btemp\s*\d*\b)', '', nombre_base, flags=re.IGNORECASE).strip()
-            if not nombre_base:
-                nombre_base = titulo.strip()
-            if nombre_base.lower() in vistos:
+            nombre_base = extraer_nombre_base_serie(titulo)
+            clave = clave_serie_catalogo(titulo)
+            if not nombre_base or not clave or clave in vistos:
                 continue
-            vistos.add(nombre_base.lower())
+            vistos.add(clave)
             series_unicas.append((id_registro, nombre_base))
         total_items = len(series_unicas)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
@@ -978,9 +976,8 @@ async def mostrar_temporadas_serie(update: Update, context: ContextTypes.DEFAULT
             nombre_serie = data[len("seriestemp_"):].strip()
         else:
             return
-        nombre_consulta = extraer_nombre_base_serie(nombre_serie)
-        nombre_escaped = nombre_consulta.replace("'", "''").lower()
-        sql = f"SELECT id, temporada FROM peliculas WHERE LOWER(titulo) LIKE '%{nombre_escaped}%' AND temporada != 'General' ORDER BY id ASC"
+        clave_buscada = clave_serie_catalogo(nombre_serie)
+        sql = "SELECT id, titulo, temporada FROM peliculas WHERE temporada != 'General' ORDER BY id ASC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
@@ -988,8 +985,9 @@ async def mostrar_temporadas_serie(update: Update, context: ContextTypes.DEFAULT
         temporadas_vistas = set()
         for row in rows:
             id_registro = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
-            temp = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else "Temporada 1"
-            if not id_registro or temp in temporadas_vistas:
+            titulo_registro = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else ""
+            temp = str(row[2]["value"]) if len(row) > 2 and row[2].get("value") is not None else "Temporada 1"
+            if not id_registro or clave_serie_catalogo(titulo_registro) != clave_buscada or temp in temporadas_vistas:
                 continue
             temporadas_vistas.add(temp)
             keyboard.append([InlineKeyboardButton(f"📁 {temp}", callback_data=f"seltemp_id_{id_registro}_{temp}")])
