@@ -718,11 +718,19 @@ def limpiar_titulo_pelicula(caption: str) -> str:
     # Si hay dos títulos en idiomas distintos separados por ' / ', conservar el primero.
     titulo = re.split(r"\s+/\s+", titulo, maxsplit=1)[0].strip()
 
-    # Quitar etiquetas técnicas al final (resolución, calidad y formatos).
-    titulo = re.sub(
-        r"\s*[\[(]\s*(?:4K|8K|2160P|1440P|1080P|720P|480P|360P|"
+    # Quitar etiquetas técnicas al final, tanto entre (), [] o {}
+    # como separadas por guiones (sin tocar guiones internos del título).
+    etiqueta_tecnica = (
+        r"(?:4K|8K|2160P|1440P|1080P|720P|480P|360P|"
         r"HD|FHD|UHD|HDR|BLURAY|BLU[- ]?RAY|WEB[- ]?DL|WEBRIP|HDRIP|"
-        r"DVDRIP|X264|X265|HEVC|AAC|DUAL AUDIO|SUBTITULAD[AO]S?)\s*[\])]\s*$",
+        r"DVDRIP|X264|X265|HEVC|AAC|DUAL AUDIO|SUBTITULAD[AO]S?)"
+    )
+    patron_etiqueta_final = (
+        rf"(?:\\s*[\\[(\\{{]\\s*{etiqueta_tecnica}\\s*[\\])\\}}]\\s*"
+        rf"|\\s+[-–—]\\s*{etiqueta_tecnica}\\s*)+$"
+    )
+    titulo = re.sub(
+        patron_etiqueta_final,
         "",
         titulo,
         flags=re.IGNORECASE
