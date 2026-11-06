@@ -678,8 +678,10 @@ def extraer_nombre_base_serie(titulo: str) -> str:
     nombre = (titulo or "").strip()
     if " (" in nombre:
         nombre = nombre.split(" (", 1)[0].strip()
+    # El marcador del episodio puede ir seguido de banderas/emojis del canal.
+    # Quitarlos junto al marcador evita buscar solo el primer episodio (p. ej. "Serie 1x1 🇲🇽").
     nombre = re.sub(
-        r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)\s*$",
+        r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)(?:\s*[^\w\s]+)*\s*$",
         "",
         nombre
     ).strip()
