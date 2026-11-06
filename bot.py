@@ -846,12 +846,11 @@ def limpiar_titulo_pelicula(caption: str) -> str:
 
 
 def titulo_para_boton_pelicula(titulo: str) -> str:
-    """Muestra el año una sola vez y entre paréntesis en los botones de películas."""
+    """Oculta el año en los botones de películas sin modificar el título guardado."""
     titulo = (titulo or "").strip()
-    coincidencia = re.match(r"^(.*?)\s+(\d{4})(?:\s*\(\s*\2\s*\))?$", titulo)
-    if coincidencia and coincidencia.group(1).strip():
-        return f"{coincidencia.group(1).strip()} ({coincidencia.group(2)})"
-    return titulo
+    # Elimina años finales tanto con paréntesis como sin ellos, incluso si están duplicados.
+    titulo = re.sub(r"(?:\s+\d{4}|\s*\(\s*\d{4}\s*\))+$", "", titulo)
+    return titulo.strip()
 
 
 # INGESTA AUTOMÁTICA DESDE CANAL MEJORADA
@@ -2202,7 +2201,7 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if not id_registro:
                     continue
                 if temporada == "General":
-                    button_text = f"🎬 Ver: {titulo_encontrado}"
+                    button_text = f"🎬 Ver: {titulo_para_boton_pelicula(titulo_encontrado)}"
                 else:
                     button_text = f"📺 Ver: {nombre_base} - {temporada}"
                 callback_data = f"seltemp_id_{id_registro}_{temporada}"
