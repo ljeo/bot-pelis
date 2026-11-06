@@ -706,7 +706,20 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         else:
             break
 
-    return titulo.strip() or "Sin Título"
+    # Normalizar el año de estreno al final: "Título. (2026)" -> "Título 2026".
+    # También admite [2026], {2026} y separadores repetidos antes del año.
+    titulo = re.sub(
+        r"[\\s.·•:：_–—-]*[([{]\\s*(\\d{4})\\s*[)\\]}][.!?。，、]*$",
+        r" \\1",
+        titulo
+    )
+    titulo = re.sub(
+        r"[\\s.·•:：_–—-]+(\\d{4})[.!?。，、]*$",
+        r" \\1",
+        titulo
+    )
+    titulo = re.sub(r"\\s+", " ", titulo).strip(" .·•:：_–—-")
+    return titulo or "Sin Título"
 
 
 # INGESTA AUTOMÁTICA DESDE CANAL MEJORADA
