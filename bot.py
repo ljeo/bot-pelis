@@ -2815,12 +2815,12 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if not (patron_pelicula or patron_serie):
         # En películas el año es opcional; en series sigue siendo obligatorio indicar temporada.
-        if not re.search(r"\\b(?:temporada\\s*\\d+|temp\\s*\\d+|\\d+[xX]\\d+)\\s*$", texto_args, re.IGNORECASE):
+        if not re.search(r"\b(?:temporada\s*\d+|temp\s*\d+|\d+[xX]\d+)\s*$", texto_args, re.IGNORECASE):
             titulo_sin_anio = texto_args
         else:
             await update.message.reply_text(
-                "⚠️ **Formato no válido.**\\n\\n"
-                "🎬 **Película:** puedes indicar solo el título o añadir el año. Ejemplo: `/pedir Batman 2022`\\n"
+                "⚠️ **Formato no válido.**\n\n"
+                "🎬 **Película:** puedes indicar solo el título o añadir el año. Ejemplo: `/pedir Batman 2022`\n"
                 "📺 **Serie o anime:** título + temporada. Ejemplos: `/pedir Loki Temporada 1` o `/pedir One Piece 1x8`",
                 parse_mode="Markdown"
             )
@@ -2845,7 +2845,7 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             condicion_titulo = f"LOWER(titulo) LIKE '%{titulo_sql}%'"
         else:
             # Buscar por la primera palabra y validar después el título completo.
-            palabras = re.findall(r"[\\w]+", titulo_solicitado.lower())
+            palabras = re.findall(r"[\w]+", titulo_solicitado.lower())
             termino = (palabras[0] if palabras else titulo_sql).replace("'", "''")
             filtro_contenido = " AND temporada = 'General'"
             if patron_pelicula:
@@ -2872,8 +2872,8 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
             def normalizar_para_pedir(valor):
                 valor = normalizar_busqueda(str(valor or ""))
-                valor = re.sub(r"\\b(?:19|20)\\d{2}\\b", " ", valor)
-                valor = re.sub(r"\\([^)]*\\)", " ", valor)
+                valor = re.sub(r"\b(?:19|20)\d{2}\b", " ", valor)
+                valor = re.sub(r"\([^)]*\)", " ", valor)
                 return re.sub(r"[^a-z0-9]+", " ", valor).strip()
 
             objetivo = normalizar_para_pedir(titulo_solicitado)
