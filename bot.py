@@ -1105,7 +1105,7 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
         peliculas.sort(key=lambda item: (item[0], item[1], item[2], int(item[3])))
         keyboard = []
         for _, _, _, pelicula_id, titulo, anio in peliculas:
-            etiqueta = f"{anio} · {titulo}" if anio else titulo
+            etiqueta = f"{titulo} ({anio})" if anio and f"({anio})" not in titulo else titulo
             keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{pelicula_id}_General")])
         keyboard.append([InlineKeyboardButton("🔙 Volver a Películas", callback_data="cat_peliculas")])
         await editar_o_enviar(
