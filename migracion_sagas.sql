@@ -30,3 +30,13 @@ AFTER DELETE ON peliculas
 BEGIN
     DELETE FROM saga_peliculas WHERE pelicula_id = OLD.id;
 END;
+
+
+-- Al borrar una saga, elimina sus películas y vínculos en una sola operación.
+CREATE TRIGGER IF NOT EXISTS trg_saga_delete_movies
+AFTER DELETE ON sagas
+BEGIN
+    DELETE FROM peliculas
+    WHERE id IN (SELECT pelicula_id FROM saga_peliculas WHERE saga_id = OLD.id);
+    DELETE FROM saga_peliculas WHERE saga_id = OLD.id;
+END;
