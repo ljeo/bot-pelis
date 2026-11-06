@@ -1659,23 +1659,28 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
                 return
         else:
             num_temp = temporada.replace("Temporada ", "").strip()
-            titulo_escaped = titulo_base.replace("'", "''")
             temp_escaped = temporada.replace("'", "''")
-            sql_count = f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '{titulo_escaped.lower()}%' AND temporada = '{temp_escaped}'"
-            res_count = await ejecutar_turso_sql([sql_count])
-            
-            count = 0
-            try:
-                results_list = res_count.get("results", [])
-                if results_list and "response" in results_list[0]:
-                    rows = results_list[0]["response"].get("result", {}).get("rows", [])
-                    if rows and "value" in rows[0][0]:
-                        count = int(rows[0][0]["value"])
-            except Exception:
-                count = 0
-
-            siguiente_cap = count + 1
-            titulo_final = f"{titulo_base} ({num_temp}x{siguiente_cap})"
+            clave_objetivo = clave_serie_catalogo(titulo_base)
+            res_episodios = await ejecutar_turso_sql([
+                f"SELECT titulo FROM peliculas WHERE temporada = '{temp_escaped}'"
+            ])
+            filas_episodios = res_episodios.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            numeros_existentes = []
+            for fila in filas_episodios:
+                titulo_existente = str(fila[0].get("value", "")) if fila else ""
+                if clave_serie_catalogo(titulo_existente) != clave_objetivo:
+                    continue
+                marcador = re.search(
+                    r"\((\d{1,2})[xX](\d{1,2})\)\s*$|\b(\d{1,2})[xX](\d{1,2})\b",
+                    titulo_existente
+                )
+                if marcador:
+                    temporada_existente = int(marcador.group(1) or marcador.group(3))
+                    episodio_existente = int(marcador.group(2) or marcador.group(4))
+                    if temporada_existente == int(num_temp):
+                        numeros_existentes.append(episodio_existente)
+            siguiente_cap = max(numeros_existentes, default=0) + 1
+            titulo_final = f"{titulo_base} ({num_temp}x{siguiente_cap:02d})"
             temp_guardar = temporada
 
         titulo_final_escaped = titulo_final.replace("'", "''")
