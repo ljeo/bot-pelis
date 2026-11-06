@@ -706,21 +706,33 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         return "Sin Título"
 
     titulo = lineas[0]
-    # Si el canal publica el título en dos idiomas separados por '/', conservar
-    # el primero para evitar guardar el mismo nombre duplicado.
+    # Si hay dos títulos en idiomas distintos separados por ' / ', conservar el primero.
     titulo = re.split(r"\s+/\s+", titulo, maxsplit=1)[0].strip()
 
-    # Quitar emojis y símbolos decorativos al inicio (⭐, 🎬, 📀, etc.).
+    # Quitar etiquetas técnicas al final (resolución, calidad y formatos).
+    titulo = re.sub(
+        r"\s*[\[(]\s*(?:4K|8K|2160P|1440P|1080P|720P|480P|360P|"
+        r"HD|FHD|UHD|HDR|BLURAY|BLU[- ]?RAY|WEB[- ]?DL|WEBRIP|HDRIP|"
+        r"DVDRIP|X264|X265|HEVC|AAC|DUAL AUDIO|SUBTITULAD[AO]S?)\s*[\])]\s*$",
+        "",
+        titulo,
+        flags=re.IGNORECASE
+    ).strip()
+
+    # Eliminar banderas de países al final, incluso si están separadas por '/'.
+    titulo = re.sub(r"(?:\s*[/|]\s*[🇦-🇿]{2})+\s*$", "", titulo).strip()
+    titulo = re.sub(r"\s*[🇦-🇿]{2}\s*$", "", titulo).strip()
+
+    # Quitar emojis/símbolos decorativos que hayan quedado al final.
     while titulo:
-        caracter = titulo[0]
+        caracter = titulo[-1]
         categoria = unicodedata.category(caracter)
-        if caracter.isspace() or categoria.startswith("S") or categoria.startswith("P") or caracter in ("\ufe0f", "\u200d"):
-            titulo = titulo[1:].lstrip()
+        if categoria.startswith("S") or caracter in ("\ufe0f", "\u200d"):
+            titulo = titulo[:-1].rstrip()
         else:
             break
 
-    # Normalizar el año de estreno al final: "Título. (2026)" -> "Título 2026".
-    # También admite [2026], {2026} y separadores repetidos antes del año.
+    # Normalizar el año: "Título (2026)" -> "Título 2026".
     titulo = re.sub(
         r"[\s.·•:：_–—-]*[([{]\s*(\d{4})\s*[)\]}][.!?。，、]*$",
         r" \1",
