@@ -1603,7 +1603,10 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("⛔ No tienes permisos para realizar esta acción.")
         return
 
-    video_obj = update.message.video or (update.message.reply_to_message and update.message.reply_to_message.video)
+    # Si /guardar se envía como respuesta a un vídeo, ese vídeo es la fuente explícita.
+    # Priorizarlo evita tomar por error un vídeo adjunto al propio comando.
+    mensaje_video = update.message.reply_to_message or update.message
+    video_obj = mensaje_video.video
     if not video_obj:
         await update.message.reply_text("⚠️ Debes responder con `/guardar [nombre]` directamente a un **video**.", parse_mode="Markdown")
         return
@@ -1620,6 +1623,10 @@ async def guardar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows", [])
         if rows_file:
             nombre_existente = rows_file[0][0].get("value", "este contenido")
+            logger.warning(
+                "Guardado manual rechazado por file_id duplicado: "
+                f"archivo={video_obj.file_unique_id}, título_existente={nombre_existente!r}"
+            )
             await update.message.reply_text(f"⚠️ **Este archivo ya se encuentra registrado** con el nombre: *{nombre_existente}*.", parse_mode="Markdown")
             return
     except Exception:
