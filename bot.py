@@ -2203,22 +2203,18 @@ async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAU
         if data.startswith("sagadel_all_"):
             saga_id = int(data[len("sagadel_all_"):])
             res = await ejecutar_turso_sql([
-                f"SELECT nombre FROM sagas WHERE id = {saga_id} LIMIT 1"
+                f"SELECT nombre FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}' LIMIT 1"
             ])
             filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if not filas:
                 await editar_o_enviar(query, "⚠️ Esta saga ya no existe.")
                 return
-            res_trigger = await ejecutar_turso_sql(["SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_saga_peliculas_delete'"])
+            res_trigger = await ejecutar_turso_sql(["SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_saga_delete_movies'"])
             triggers = res_trigger.get("results", [])[0]["response"]["result"].get("rows", [])
             if not triggers:
                 await editar_o_enviar(query, "⚠️ Falta aplicar la migración de seguridad de sagas. No se borró nada.")
                 return
-            await ejecutar_turso_sql([
-                f"DELETE FROM peliculas WHERE chat_id = '{chat_id}' AND temporada = 'General' "
-                f"AND id IN (SELECT sp.pelicula_id FROM saga_peliculas sp INNER JOIN sagas s ON s.id = sp.saga_id "
-                f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}')"
-            ])
+            # El trigger borra películas y relaciones dentro de esta misma sentencia DELETE.
             await ejecutar_turso_sql([f"DELETE FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}'"])
             await editar_o_enviar(query, "✅ Saga completa eliminada del catálogo.")
             return
