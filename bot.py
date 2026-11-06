@@ -2284,7 +2284,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             for fila in rows:
                 titulo_fila = str(fila[2].get("value", "")) if len(fila) > 2 else ""
                 anio_fila = extraer_anio_titulo(titulo_fila)
-                titulo_sin_anio = re.sub(r"\\b(?:19|20)\\d{2}\\b", "", titulo_fila)
+                titulo_sin_anio = re.sub(r"\b(?:19|20)\d{2}\b", "", titulo_fila)
                 titulo_normalizado = re.sub(
                     r"[^a-z0-9]", "", normalizar_busqueda(titulo_sin_anio)
                 )
