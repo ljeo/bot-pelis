@@ -971,6 +971,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     data = query.data or "cat_peliculas"
+    chat_id = str(query.message.chat_id).replace("'", "''")
     pagina = 0
     if "_p_" in data:
         try:
@@ -979,7 +980,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
             pagina = 0
     ITEMS_POR_PAGINA = 8
     try:
-        sql = "SELECT id, titulo FROM peliculas WHERE temporada = 'General' ORDER BY id DESC"
+        sql = f"SELECT id, titulo FROM peliculas WHERE chat_id = '{chat_id}' AND temporada = 'General' ORDER BY id DESC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
@@ -994,7 +995,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
                 "FROM sagas s "
                 "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
                 "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-                "WHERE p.temporada = 'General' "
+                f"WHERE s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id AND p.temporada = 'General' "
                 "ORDER BY s.nombre, p.titulo"
             )
             res_sagas = await ejecutar_turso_sql([sql_sagas])
@@ -1070,6 +1071,7 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     data = query.data or ""
+    chat_id = str(query.message.chat_id).replace("'", "''")
     try:
         saga_id = int(data.replace("sagacat_", "", 1))
         sql = (
@@ -1123,6 +1125,7 @@ async def gestionar_envio_saga(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     data = query.data or ""
+    chat_id = str(query.message.chat_id).replace("'", "''")
 
     try:
         if data.startswith("sagaenv_chat_"):
@@ -1163,7 +1166,7 @@ async def gestionar_envio_saga(update: Update, context: ContextTypes.DEFAULT_TYP
             "FROM sagas s "
             "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
             "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-            f"WHERE s.id = {saga_id} AND p.temporada = 'General'"
+            f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id AND p.temporada = 'General'"
         )
         resultado = await ejecutar_turso_sql([sql])
         filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
