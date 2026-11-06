@@ -983,29 +983,69 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
-        titulos_unicos = []
+
+        # Cargar relaciones de sagas de forma opcional. Si la migración aún no existe,
+        # el catálogo individual continúa funcionando sin cambios.
+        peliculas_en_saga = set()
+        sagas_catalogo = {}
+        try:
+            sql_sagas = (
+                "SELECT s.id, s.nombre, p.id, p.titulo "
+                "FROM sagas s "
+                "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
+                "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
+                "WHERE p.temporada = 'General' "
+                "ORDER BY s.nombre, p.titulo"
+            )
+            res_sagas = await ejecutar_turso_sql([sql_sagas])
+            filas_sagas = res_sagas.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            for fila in filas_sagas:
+                if len(fila) < 4:
+                    continue
+                saga_id = str(fila[0].get("value", ""))
+                nombre_saga = str(fila[1].get("value", "")).strip()
+                pelicula_id = str(fila[2].get("value", ""))
+                titulo_pelicula = str(fila[3].get("value", "")).strip()
+                if not saga_id or not nombre_saga or not pelicula_id:
+                    continue
+                peliculas_en_saga.add(pelicula_id)
+                sagas_catalogo[saga_id] = nombre_saga
+        except Exception as e_sagas:
+            logger.info(f"Tablas de sagas no disponibles; se muestra catálogo tradicional: {e_sagas}")
+
+        elementos = []
         vistos = set()
         for row in rows:
             id_registro = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
             titulo = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else ""
-            if not id_registro or not titulo:
+            if not id_registro or not titulo or id_registro in peliculas_en_saga:
                 continue
             titulo_clean = titulo.strip()
-            if titulo_clean.lower() in vistos:
+            clave = normalizar_busqueda(titulo_clean)
+            if clave in vistos:
                 continue
-            vistos.add(titulo_clean.lower())
-            titulos_unicos.append((id_registro, titulo_clean))
-        titulos_unicos.sort(key=lambda item: normalizar_busqueda(item[1]))
-        total_items = len(titulos_unicos)
+            vistos.add(clave)
+            elementos.append(("pelicula", id_registro, titulo_clean))
+
+        for saga_id, nombre_saga in sagas_catalogo.items():
+            elementos.append(("saga", saga_id, nombre_saga))
+
+        elementos.sort(key=lambda item: normalizar_busqueda(item[2]))
+        total_items = len(elementos)
         total_paginas = (total_items + ITEMS_POR_PAGINA - 1) // ITEMS_POR_PAGINA if total_items > 0 else 1
         pagina = max(0, min(pagina, total_paginas - 1))
         inicio = pagina * ITEMS_POR_PAGINA
-        items_pagina = titulos_unicos[inicio:inicio + ITEMS_POR_PAGINA]
+        items_pagina = elementos[inicio:inicio + ITEMS_POR_PAGINA]
+
         keyboard = []
-        for id_registro, titulo_clean in items_pagina:
-            anio = extraer_anio_titulo(titulo_clean)
-            etiqueta = f"{titulo_clean} ({anio})" if anio and f"({anio})" not in titulo_clean else titulo_clean
-            keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{id_registro}_General")])
+        for tipo, identificador, nombre in items_pagina:
+            if tipo == "saga":
+                keyboard.append([InlineKeyboardButton(f"🎞️ {nombre} (Saga)", callback_data=f"sagacat_{identificador}")])
+            else:
+                anio = extraer_anio_titulo(nombre)
+                etiqueta = f"{nombre} ({anio})" if anio and f"({anio})" not in nombre else nombre
+                keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{identificador}_General")])
+
         nav_buttons = []
         if pagina > 0:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"cat_peliculas_p_{pagina - 1}"))
@@ -1016,7 +1056,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         keyboard.append([InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         if items_pagina:
-            texto_encabezado = f"🎬 **Películas Registradas** (Pág. {pagina + 1}/{total_paginas}):\n\nSelecciona la película que deseas ver:"
+            texto_encabezado = f"🎬 **Películas y sagas registradas** (Pág. {pagina + 1}/{total_paginas}):\\n\\nSelecciona una película o una saga:"
             await editar_o_enviar(query, texto_encabezado, reply_markup=reply_markup, parse_mode="Markdown")
         else:
             await editar_o_enviar(query, "⚠️ No hay películas registradas todavía.", reply_markup=reply_markup)
@@ -1025,6 +1065,59 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         keyboard = [[InlineKeyboardButton("🔙 Volver al Menú", callback_data="catalogo_volver_inicio")]]
         await editar_o_enviar(query, "❌ Ocurrió un error al cargar las películas.", reply_markup=InlineKeyboardMarkup(keyboard))
 
+
+async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+    try:
+        saga_id = int(data.replace("sagacat_", "", 1))
+        sql = (
+            "SELECT s.nombre, p.id, p.titulo "
+            "FROM sagas s "
+            "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
+            "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
+            f"WHERE s.id = {saga_id} AND p.temporada = 'General'"
+        )
+        resultado = await ejecutar_turso_sql([sql])
+        filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if not filas:
+            await editar_o_enviar(
+                query,
+                "⚠️ Esta saga no tiene películas registradas o todavía no está disponible.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Volver a Películas", callback_data="cat_peliculas")]])
+            )
+            return
+
+        nombre_saga = str(filas[0][0].get("value", "Saga"))
+        peliculas = []
+        for fila in filas:
+            if len(fila) < 3:
+                continue
+            pelicula_id = str(fila[1].get("value", ""))
+            titulo = str(fila[2].get("value", "")).strip()
+            if pelicula_id and titulo:
+                anio = extraer_anio_titulo(titulo)
+                # Los títulos con año van primero en orden cronológico; los que no
+                # contienen año quedan al final, ordenados alfabéticamente.
+                peliculas.append((0 if anio else 1, int(anio) if anio else 9999, normalizar_busqueda(titulo), pelicula_id, titulo, anio))
+
+        peliculas.sort(key=lambda item: (item[0], item[1], item[2], int(item[3])))
+        keyboard = []
+        for _, _, _, pelicula_id, titulo, anio in peliculas:
+            etiqueta = f"{anio} · {titulo}" if anio else titulo
+            keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{pelicula_id}_General")])
+        keyboard.append([InlineKeyboardButton("🔙 Volver a Películas", callback_data="cat_peliculas")])
+        await editar_o_enviar(
+            query,
+            f"🎞️ **{nombre_saga} (Saga)**\\n\\nPelículas en orden cronológico:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error mostrando películas de saga: {e}", exc_info=True)
+        await editar_o_enviar(query, "❌ No se pudo cargar esta saga.")
+ 
 async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -2465,6 +2558,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.VIDEO, guardar_desde_canal))
 
     application.add_handler(CallbackQueryHandler(mostrar_catalogo_peliculas, pattern="^cat_peliculas"))
+    application.add_handler(CallbackQueryHandler(mostrar_peliculas_saga, pattern="^sagacat_"))
     application.add_handler(CallbackQueryHandler(mostrar_catalogo_series, pattern="^cat_series"))
     application.add_handler(CallbackQueryHandler(mostrar_temporadas_serie, pattern="^seriestemp_"))
     application.add_handler(CallbackQueryHandler(catalogo_volver_inicio, pattern="^catalogo_volver_inicio$"))
