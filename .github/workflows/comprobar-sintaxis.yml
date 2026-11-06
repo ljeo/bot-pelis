@@ -1,0 +1,23 @@
+name: Comprobar sintaxis Python
+
+on:
+  push:
+    branches:
+      - mejoras-sagas-busqueda
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Comprobar sintaxis
+        run: python -m py_compile bot.py
