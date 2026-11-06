@@ -630,6 +630,21 @@ def numero_temporada_catalogo(temporada: str, titulo: str = ""):
     return None
 
 
+def es_episodio_de_serie_y_temporada(row, clave_buscada: str, temporada_buscada: int) -> bool:
+    """Incluye episodios antiguos sin numeración, guardados como General, en la temporada 1."""
+    if len(row) < 2:
+        return False
+    titulo = str(row[1].get("value", "") or "")
+    if clave_serie_catalogo(titulo) != clave_buscada:
+        return False
+    temporada = str(row[2].get("value", "General") or "General") if len(row) > 2 else "General"
+    numero = numero_temporada_catalogo(temporada, titulo)
+    if numero is not None:
+        return numero == temporada_buscada
+    # Compatibilidad con el episodio 1 guardado antes de normalizar numeración.
+    return temporada.strip().lower() == "general" and temporada_buscada == 1
+
+
 def titulo_capitulo_para_envio(titulo: str) -> str:
     """Muestra el episodio sin paréntesis, aunque se almacene en formato canónico."""
     return re.sub(
@@ -2363,12 +2378,7 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
                 numero_temp_buscada = numero_temporada_catalogo(temporada)
                 rows = [
                     row for row in rows
-                    if len(row) > 1
-                    and clave_serie_catalogo(str(row[1].get("value", ""))) == clave_buscada
-                    and numero_temporada_catalogo(
-                        str(row[2].get("value", "")) if len(row) > 2 else "General",
-                        str(row[1].get("value", ""))
-                    ) == numero_temp_buscada
+                    if es_episodio_de_serie_y_temporada(row, clave_buscada, numero_temp_buscada)
                 ]
                 rows = ordenar_episodios(rows)
             if rows:
@@ -2464,12 +2474,7 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
             numero_temp_buscada = numero_temporada_catalogo(temporada)
             rows = [
                 row for row in rows
-                if len(row) > 1
-                and clave_serie_catalogo(str(row[1].get("value", ""))) == clave_buscada
-                and numero_temporada_catalogo(
-                    str(row[2].get("value", "")) if len(row) > 2 else "General",
-                    str(row[1].get("value", ""))
-                ) == numero_temp_buscada
+                if es_episodio_de_serie_y_temporada(row, clave_buscada, numero_temp_buscada)
             ]
         if temporada != "General" and rows:
             def clave_orden_capitulo(row):
@@ -2482,7 +2487,7 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     temporada_num = int(coincidencia.group(1) or coincidencia.group(3))
                     episodio_num = int(coincidencia.group(2) or coincidencia.group(4))
                     return (0, temporada_num, episodio_num)
-                return (1, 0, 0)
+                return (0, 1, 1)
 
             rows.sort(key=clave_orden_capitulo)
         if rows:
