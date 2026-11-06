@@ -1626,14 +1626,28 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else query_texto
                 
                 nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
-                # Cada fila representa un episodio; el botón agrupa por serie y temporada.
-                # Quita 1x1 / S01E01 y posibles emojis o banderas posteriores.
-                nombre_base = re.sub(
-                    r"\s*(?:\b\d{1,2}[xX]\d{1,2}\b|\b[Ss]\d{1,2}[Ee]\d{1,2}\b)(?:\s*[^\w\s]+)*\s*$",
-                    "",
-                    nombre_base
-                ).strip()
-                clave_unica = f"{re.sub(r'[^a-z0-9]', '', nombre_base.lower())}_{temporada.lower()}"
+                if temporada != "General":
+                    # El marcador del episodio puede estar al inicio o al final
+                    # (por ejemplo: "2x5 Merlina" o "Merlina 2x5").
+                    nombre_base = re.sub(
+                        r"^\s*(?:\d{1,2}[xX]\d{1,2}|[Ss]\d{1,2}[Ee]\d{1,2})\s*",
+                        "",
+                        nombre_base
+                    )
+                    nombre_base = re.sub(
+                        r"\s*(?:\d{1,2}[xX]\d{1,2}|[Ss]\d{1,2}[Ee]\d{1,2})(?:\s*[^\w\s]+)*\s*$",
+                        "",
+                        nombre_base
+                    )
+                    # Evita repetir "temporada N" si ya viene dentro del título.
+                    nombre_base = re.sub(
+                        r"\s+(?:temporada|temp)\s*\d+\s*$",
+                        "",
+                        nombre_base,
+                        flags=re.IGNORECASE
+                    ).strip(" -–—:|")
+                clave_nombre = re.sub(r"[^a-z0-9]", "", nombre_base.casefold())
+                clave_unica = f"{clave_nombre}_{temporada.casefold()}"
                 if clave_unica in titulos_vistos:
                     continue
                 titulos_vistos.add(clave_unica)
