@@ -932,7 +932,7 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
             "FROM sagas s "
             "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
             "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-            f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id AND p.temporada = 'General'"
+            f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id"
         )
         resultado = await ejecutar_turso_sql([sql])
         filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
