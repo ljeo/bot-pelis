@@ -676,6 +676,23 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         return "Sin Título"
 
     titulo = lineas[0]
+    # Quitar etiquetas de idioma/calidad después de "|" (por ejemplo, "| VOSE").
+    titulo = re.sub(
+        r"\s*\|\s*(?:VOSE|VOS|SUB(?:TITULAD[AO])?|LATINO|CASTELLANO|ESPAÑOL|ESPA[NÑ]OL|"
+        r"DUAL|HD|FHD|UHD|4K|1080P|720P)\s*$",
+        "",
+        titulo,
+        flags=re.IGNORECASE
+    ).strip()
+    # Si el año viene en una línea aparte, incorporarlo al título.
+    if not re.search(r"\b\d{4}\b", titulo):
+        anio_en_lineas = next(
+            (m.group(1) for linea in lineas[1:]
+             if (m := re.search(r"\b(19\d{2}|20\d{2})\b", linea))),
+            None
+        )
+        if anio_en_lineas:
+            titulo = f"{titulo} {anio_en_lineas}"
     # Quitar emojis y adornos al principio (por ejemplo: "🌟 • Título").
     while titulo and unicodedata.category(titulo[0]).startswith(("S", "P")):
         titulo = titulo[1:].lstrip()
@@ -914,6 +931,20 @@ def extraer_anio_titulo(titulo: str) -> str:
     return coincidencia.group(0) if coincidencia else ""
 
 
+def titulo_para_boton_pelicula(titulo: str) -> str:
+    """Muestra el año una sola vez y sin paréntesis en los botones."""
+    titulo = (titulo or "").strip()
+    coincidencia = re.search(r"\s*\((\d{4})\)\s*$", titulo)
+    if coincidencia:
+        titulo_sin_parentesis = titulo[:coincidencia.start()].rstrip()
+        anio = coincidencia.group(1)
+        if re.search(rf"\b{anio}$", titulo_sin_parentesis):
+            return titulo_sin_parentesis
+        if titulo_sin_parentesis:
+            return f"{titulo_sin_parentesis} {anio}"
+    return titulo
+
+
 async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -1011,8 +1042,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
             if tipo == "saga":
                 keyboard.append([InlineKeyboardButton(f"🎞️ {nombre} (Saga)", callback_data=f"sagacat_{identificador}")])
             else:
-                anio = extraer_anio_titulo(nombre)
-                etiqueta = f"{nombre} ({anio})" if anio and f"({anio})" not in nombre else nombre
+                etiqueta = titulo_para_boton_pelicula(nombre)
                 keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{identificador}_General")])
 
         nav_buttons = []
@@ -1075,7 +1105,7 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
         peliculas.sort(key=lambda item: (item[0], item[1], item[2], int(item[3])))
         keyboard = []
         for _, _, _, pelicula_id, titulo, anio in peliculas:
-            etiqueta = f"{titulo} ({anio})" if anio and f"({anio})" not in titulo else titulo
+            etiqueta = titulo_para_boton_pelicula(titulo)
             keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{pelicula_id}_General")])
         keyboard.append([InlineKeyboardButton("📤 Enviar saga completa", callback_data=f"sagaenv_{saga_id}")])
         keyboard.append([InlineKeyboardButton("🔙 Volver a Películas", callback_data="cat_peliculas")])
@@ -2347,7 +2377,7 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if not id_registro:
                     continue
                 if temporada == "General":
-                    button_text = f"🎬 {titulo_encontrado}"
+                    button_text = f"🎬 {titulo_para_boton_pelicula(titulo_encontrado)}"
                 else:
                     button_text = f"📺 {nombre_base} - {temporada}"
                 callback_data = f"seltemp_id_{id_registro}_{temporada}"
