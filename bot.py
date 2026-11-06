@@ -2814,21 +2814,25 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     patron_serie = re.search(r'^(.*?)\s+(temporada\s*\d+|temp\s*\d+|\d+[xX]\d+)$', texto_args, re.IGNORECASE)
 
     if not (patron_pelicula or patron_serie):
-        await update.message.reply_text(
-            "⚠️ **Formato no válido.**\n\n"
-            "Indica el título y el dato correspondiente:\n"
-            "🎬 **Película:** título + año. Ejemplo: `/pedir Batman 2022`\n"
-            "📺 **Serie o anime:** título + temporada. Ejemplos:\n"
-            "• `/pedir Loki Temporada 1`\n"
-            "• `/pedir Naruto temp 2`\n"
-            "• `/pedir One Piece 1x8`\n\n"
-            "Recuerda: para series se pide la temporada, no el año.",
-            parse_mode="Markdown"
-        )
-        return
+        # En películas el año es opcional; en series sigue siendo obligatorio indicar temporada.
+        if not re.search(r"\\b(?:temporada\\s*\\d+|temp\\s*\\d+|\\d+[xX]\\d+)\\s*$", texto_args, re.IGNORECASE):
+            titulo_sin_anio = texto_args
+        else:
+            await update.message.reply_text(
+                "⚠️ **Formato no válido.**\\n\\n"
+                "🎬 **Película:** puedes indicar solo el título o añadir el año. Ejemplo: `/pedir Batman 2022`\\n"
+                "📺 **Serie o anime:** título + temporada. Ejemplos: `/pedir Loki Temporada 1` o `/pedir One Piece 1x8`",
+                parse_mode="Markdown"
+            )
+            return
+    else:
+        titulo_sin_anio = None
 
     try:
-        titulo_solicitado = patron_pelicula.group(1).strip() if patron_pelicula else patron_serie.group(1).strip()
+        titulo_solicitado = (
+            patron_pelicula.group(1).strip() if patron_pelicula
+            else (titulo_sin_anio.strip() if titulo_sin_anio is not None else patron_serie.group(1).strip())
+        )
         temporada_solicitada = "General"
         if patron_serie:
             temporada_num = re.search(r"\d+", patron_serie.group(2)).group(0)
@@ -2838,21 +2842,22 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         temporada_sql_busqueda = temporada_solicitada.replace("'", "''")
         if patron_serie:
             filtro_contenido = f" AND temporada = '{temporada_sql_busqueda}'"
+            condicion_titulo = f"LOWER(titulo) LIKE '%{titulo_sql}%'"
         else:
-            # Las películas deben coincidir también con el año solicitado;
-            # no basta con que compartan el nombre (ej. Spider-Man 2002 vs 2026).
-            anio_solicitado = patron_pelicula.group(2)
-            filtro_contenido = (
-                " AND temporada = 'General'"
-                f" AND titulo LIKE '%{anio_solicitado}%'"
-            )
+            # Buscar por la primera palabra y validar después el título completo.
+            palabras = re.findall(r"[\\w]+", titulo_solicitado.lower())
+            termino = (palabras[0] if palabras else titulo_sql).replace("'", "''")
+            filtro_contenido = " AND temporada = 'General'"
+            if patron_pelicula:
+                filtro_contenido += f" AND titulo LIKE '%{patron_pelicula.group(2)}%'"
+            condicion_titulo = f"LOWER(titulo) LIKE '%{termino}%'"
         sql = (
             "SELECT id, temporada, titulo, file_id FROM peliculas "
-            f"WHERE LOWER(titulo) LIKE '%{titulo_sql}%'{filtro_contenido} "
-            "ORDER BY id DESC LIMIT 50"
+            f"WHERE {condicion_titulo}{filtro_contenido} "
+            "ORDER BY id DESC LIMIT 200"
         )
         resultado = await ejecutar_turso_sql([sql])
-        
+
         rows = []
         try:
             results_list = resultado.get("results", [])
@@ -2861,28 +2866,35 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
 
-        # La consulta SQL usa LIKE para acotar candidatos, pero no garantiza
-        # que el título coincida completo (por ejemplo, "it" aparece dentro
-        # de "Infinity"). Para películas exigimos coincidencia exacta de
-        # título normalizado y año antes de mostrar cualquier resultado.
-        if patron_pelicula and rows:
-            titulo_objetivo = re.sub(
-                r"[^a-z0-9]", "", normalizar_busqueda(titulo_solicitado)
-            )
-            anio_objetivo = patron_pelicula.group(2)
-            filas_exactas = []
+        # Ignora año, acentos y alias entre paréntesis; acepta variantes cercanas.
+        if not patron_serie and rows:
+            from difflib import SequenceMatcher
+
+            def normalizar_para_pedir(valor):
+                valor = normalizar_busqueda(str(valor or ""))
+                valor = re.sub(r"\\b(?:19|20)\\d{2}\\b", " ", valor)
+                valor = re.sub(r"\\([^)]*\\)", " ", valor)
+                return re.sub(r"[^a-z0-9]+", " ", valor).strip()
+
+            objetivo = normalizar_para_pedir(titulo_solicitado)
+            tokens_objetivo = set(objetivo.split())
+            anio_objetivo = patron_pelicula.group(2) if patron_pelicula else None
+            coincidentes = []
             for fila in rows:
                 if len(fila) <= 2 or "value" not in fila[2]:
                     continue
                 titulo_fila = str(fila[2]["value"] or "")
-                anio_fila = extraer_anio_titulo(titulo_fila)
-                titulo_sin_anio = re.sub(r"\\b(?:19|20)\\d{2}\\b", "", titulo_fila)
-                titulo_normalizado = re.sub(
-                    r"[^a-z0-9]", "", normalizar_busqueda(titulo_sin_anio)
-                )
-                if anio_fila == anio_objetivo and titulo_normalizado == titulo_objetivo:
-                    filas_exactas.append(fila)
-            rows = filas_exactas
+                if anio_objetivo and extraer_anio_titulo(titulo_fila) != anio_objetivo:
+                    continue
+                normalizado = normalizar_para_pedir(titulo_fila)
+                tokens_fila = set(normalizado.split())
+                if not objetivo or not normalizado:
+                    continue
+                ratio = SequenceMatcher(None, objetivo, normalizado).ratio()
+                cobertura = len(tokens_objetivo & tokens_fila) / max(1, min(len(tokens_objetivo), len(tokens_fila)))
+                if objetivo == normalizado or objetivo in normalizado or (ratio >= 0.68 and cobertura >= 0.65):
+                    coincidentes.append(fila)
+            rows = coincidentes
 
         if rows:
             keyboard = []
