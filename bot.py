@@ -811,6 +811,28 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
             return
 
+        marcador_nuevo = re.search(r"\((\d{1,2})[xX](\d{1,2})\)\s*$", titulo_guardar)
+        if marcador_nuevo:
+            clave_nueva = clave_serie_catalogo(titulo_guardar)
+            temporada_nueva = int(marcador_nuevo.group(1))
+            episodio_nuevo = int(marcador_nuevo.group(2))
+            res_existentes = await ejecutar_turso_sql([
+                f"SELECT titulo FROM peliculas WHERE temporada = '{temp_escaped}'"
+            ])
+            filas_existentes = res_existentes.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            for fila_existente in filas_existentes:
+                titulo_existente = str(fila_existente[0].get("value", "")) if fila_existente else ""
+                marcador_existente = re.search(r"\((\d{1,2})[xX](\d{1,2})\)\s*$", titulo_existente)
+                if not marcador_existente:
+                    continue
+                if (
+                    clave_serie_catalogo(titulo_existente) == clave_nueva
+                    and int(marcador_existente.group(1)) == temporada_nueva
+                    and int(marcador_existente.group(2)) == episodio_nuevo
+                ):
+                    logger.info(f"Episodio duplicado omitido por nombre normalizado: {titulo_guardar}")
+                    return
+
         sql_insert = f"INSERT INTO peliculas (chat_id, titulo, file_id, temporada) VALUES ('{chat_id}', '{titulo_escaped}', '{file_id}', '{temp_escaped}')"
         await ejecutar_turso_sql([sql_insert])
         logger.info(f"✅ Contenido guardado automáticamente desde canal: {titulo_guardar} - {temporada}")
