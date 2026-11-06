@@ -1908,13 +1908,47 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
         ]
         rows.sort(key=lambda fila: normalizar_busqueda(str(fila[1].get("value", ""))))
 
-        if not rows:
+        # Detectar películas pertenecientes a sagas sin alterar el flujo de series/anime.
+        filas_sagas = []
+        ids_peliculas_en_sagas = set()
+        sagas_encontradas = {}
+        try:
+            res_sagas = await ejecutar_turso_sql([
+                "SELECT s.id, s.nombre, p.id, p.titulo "
+                "FROM sagas s "
+                "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
+                "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
+                "WHERE p.temporada = 'General'"
+            ])
+            filas_sagas = res_sagas.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            for fila_saga in filas_sagas:
+                if len(fila_saga) < 4:
+                    continue
+                saga_id = str(fila_saga[0].get("value", ""))
+                nombre_saga = str(fila_saga[1].get("value", ""))
+                pelicula_id = str(fila_saga[2].get("value", ""))
+                titulo_pelicula = str(fila_saga[3].get("value", ""))
+                if pelicula_id:
+                    ids_peliculas_en_sagas.add(pelicula_id)
+                if consulta_normalizada in normalizar_busqueda(nombre_saga) or consulta_normalizada in normalizar_busqueda(titulo_pelicula):
+                    sagas_encontradas[saga_id] = nombre_saga
+        except Exception as e_sagas:
+            logger.info(f"No se pudieron consultar las relaciones de sagas para /eliminar: {e_sagas}")
+
+        if not rows and not sagas_encontradas:
             await update.message.reply_text(
                 f"🔍 No encontré ningún contenido registrado con el nombre '{query_texto}'."
             )
             return
 
-        peliculas = [r for r in rows if len(r) > 2 and str(r[2].get("value", "General")) == "General"]
+        # Las películas de saga se gestionan por ID en sus acciones dedicadas,
+        # evitando que la eliminación genérica por texto deje relaciones huérfanas.
+        peliculas = [
+            r for r in rows
+            if len(r) > 2
+            and str(r[2].get("value", "General")) == "General"
+            and str(r[0].get("value", "")) not in ids_peliculas_en_sagas
+        ]
         episodios = [r for r in rows if len(r) > 2 and str(r[2].get("value", "General")) != "General"]
 
         token = secrets.token_hex(4)
@@ -1942,7 +1976,17 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
                 callback_data=f"delind_{token}"
             )])
 
-        nombre_base = str(rows[0][1].get("value", query_texto)).split(" (")[0].strip()
+        for saga_id, nombre_saga in sorted(sagas_encontradas.items(), key=lambda item: normalizar_busqueda(item[1])):
+            keyboard.append([InlineKeyboardButton(
+                f"🎞️ Elegir película de {nombre_saga}",
+                callback_data=f"sagadel_pick_{saga_id}"
+            )])
+            keyboard.append([InlineKeyboardButton(
+                f"🗑️ Eliminar saga completa: {nombre_saga}",
+                callback_data=f"sagadel_confirm_all_{saga_id}"
+            )])
+
+        nombre_base = str(rows[0][1].get("value", query_texto)).split(" (")[0].strip() if rows else query_texto
         await update.message.reply_text(
             f"🗑️ Opciones de eliminación para: *{nombre_base}*\n\n"
             "Elige exactamente qué deseas borrar:",
@@ -2101,6 +2145,154 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             logger.error(f"Error eliminando capítulo: {e}", exc_info=True)
             await editar_o_enviar(query, "❌ Ocurrió un error al intentar eliminar el capítulo.")
         return
+
+async def gestionar_eliminacion_saga(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    if not await es_admin(query.from_user.id):
+        await editar_o_enviar(query, "⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    try:
+        if data.startswith("sagadel_pick_"):
+            saga_id = int(data[len("sagadel_pick_"):])
+            res = await ejecutar_turso_sql([
+                "SELECT s.nombre, p.id, p.titulo "
+                "FROM sagas s "
+                "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
+                "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
+                f"WHERE s.id = {saga_id} AND p.temporada = 'General'"
+            ])
+            filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if not filas:
+                await editar_o_enviar(query, "⚠️ Esta saga no tiene películas registradas.")
+                return
+            nombre_saga = str(filas[0][0].get("value", "Saga"))
+            opciones = []
+            for fila in filas:
+                if len(fila) < 3:
+                    continue
+                pelicula_id = int(fila[1].get("value"))
+                titulo = str(fila[2].get("value", "Película"))
+                opciones.append((titulo, pelicula_id))
+            opciones.sort(key=lambda item: normalizar_busqueda(item[0]))
+            keyboard = [
+                [InlineKeyboardButton(f"🗑️ {titulo}", callback_data=f"sagadel_confirm_movie_{saga_id}_{pelicula_id}")]
+                for titulo, pelicula_id in opciones
+            ]
+            keyboard.append([InlineKeyboardButton("🔙 Cancelar", callback_data="sagadel_cancel")])
+            await editar_o_enviar(
+                query,
+                f"🎞️ **{nombre_saga}**\n\nSelecciona la película concreta que deseas eliminar:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+
+        if data.startswith("sagadel_confirm_movie_"):
+            partes = data[len("sagadel_confirm_movie_"):].split("_")
+            if len(partes) != 2:
+                await editar_o_enviar(query, "❌ Selección no válida.")
+                return
+            saga_id, pelicula_id = map(int, partes)
+            res = await ejecutar_turso_sql([
+                "SELECT s.nombre, p.titulo FROM sagas s "
+                "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
+                "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
+                f"WHERE s.id = {saga_id} AND p.id = {pelicula_id} AND p.temporada = 'General' LIMIT 1"
+            ])
+            filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if not filas:
+                await editar_o_enviar(query, "⚠️ Esa película ya no pertenece a esta saga.")
+                return
+            nombre_saga = str(filas[0][0].get("value", "Saga"))
+            titulo = str(filas[0][1].get("value", "Película"))
+            keyboard = [[
+                InlineKeyboardButton("✅ Sí, eliminar película", callback_data=f"sagadel_movie_{saga_id}_{pelicula_id}"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="sagadel_cancel")
+            ]]
+            await editar_o_enviar(
+                query,
+                f"⚠️ ¿Eliminar **{titulo}** de **{nombre_saga}**?\n\nSe borrará también su archivo del catálogo.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+
+        if data.startswith("sagadel_confirm_all_"):
+            saga_id = int(data[len("sagadel_confirm_all_"):])
+            res = await ejecutar_turso_sql([
+                f"SELECT nombre FROM sagas WHERE id = {saga_id} LIMIT 1"
+            ])
+            filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if not filas:
+                await editar_o_enviar(query, "⚠️ Esta saga ya no existe.")
+                return
+            nombre_saga = str(filas[0][0].get("value", "Saga"))
+            keyboard = [[
+                InlineKeyboardButton("✅ Sí, eliminar saga", callback_data=f"sagadel_all_{saga_id}"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="sagadel_cancel")
+            ]]
+            await editar_o_enviar(
+                query,
+                f"⚠️ ¿Eliminar la saga completa **{nombre_saga}**?\n\nSe borrarán todas sus películas y sus archivos del catálogo. Esta acción no se puede deshacer.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+
+        if data.startswith("sagadel_movie_"):
+            partes = data[len("sagadel_movie_"):].split("_")
+            if len(partes) != 2:
+                await editar_o_enviar(query, "❌ Selección no válida.")
+                return
+            saga_id, pelicula_id = map(int, partes)
+            res = await ejecutar_turso_sql([
+                "SELECT p.titulo FROM saga_peliculas sp "
+                "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
+                f"WHERE sp.saga_id = {saga_id} AND p.id = {pelicula_id} AND p.temporada = 'General' LIMIT 1"
+            ])
+            filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if not filas:
+                await editar_o_enviar(query, "⚠️ La película ya no está asociada a esta saga.")
+                return
+            await ejecutar_turso_sql([
+                f"DELETE FROM saga_peliculas WHERE saga_id = {saga_id} AND pelicula_id = {pelicula_id}",
+                f"DELETE FROM peliculas WHERE id = {pelicula_id} AND temporada = 'General'",
+                f"DELETE FROM sagas WHERE id = {saga_id} AND NOT EXISTS (SELECT 1 FROM saga_peliculas WHERE saga_id = {saga_id})"
+            ])
+            await editar_o_enviar(query, "✅ Película eliminada de la saga y del catálogo.")
+            return
+
+        if data.startswith("sagadel_all_"):
+            saga_id = int(data[len("sagadel_all_"):])
+            res = await ejecutar_turso_sql([
+                f"SELECT nombre FROM sagas WHERE id = {saga_id} LIMIT 1"
+            ])
+            filas = res.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if not filas:
+                await editar_o_enviar(query, "⚠️ Esta saga ya no existe.")
+                return
+            await ejecutar_turso_sql([
+                f"DELETE FROM peliculas WHERE id IN (SELECT pelicula_id FROM saga_peliculas WHERE saga_id = {saga_id}) AND temporada = 'General'",
+                f"DELETE FROM saga_peliculas WHERE saga_id = {saga_id}",
+                f"DELETE FROM sagas WHERE id = {saga_id}"
+            ])
+            await editar_o_enviar(query, "✅ Saga completa eliminada del catálogo.")
+            return
+
+        if data == "sagadel_cancel":
+            await editar_o_enviar(query, "❎ Eliminación cancelada.")
+            return
+
+    except ValueError:
+        await editar_o_enviar(query, "❌ Identificador no válido.")
+    except Exception as e:
+        logger.error(f"Error en la eliminación de saga: {e}", exc_info=True)
+        await editar_o_enviar(query, "❌ No se pudo completar la eliminación de la saga.")
+
 
 async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
@@ -2701,6 +2893,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
     application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
     application.add_handler(CallbackQueryHandler(boton_ver_episodio, pattern="^(send_chat_|send_priv_)"))
+    application.add_handler(CallbackQueryHandler(gestionar_eliminacion_saga, pattern="^sagadel_"))
     application.add_handler(CallbackQueryHandler(boton_eliminar_pelicula, pattern="^(delmovie_|delseries_|delseasons_|delseason_|delpel_|delind_)"))
     
     application.add_error_handler(error_handler)
