@@ -1107,6 +1107,7 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
         for _, _, _, pelicula_id, titulo, anio in peliculas:
             etiqueta = f"{titulo} ({anio})" if anio and f"({anio})" not in titulo else titulo
             keyboard.append([InlineKeyboardButton(etiqueta, callback_data=f"seltemp_id_{pelicula_id}_General")])
+        keyboard.append([InlineKeyboardButton("📤 Enviar saga completa", callback_data=f"sagaenv_{saga_id}")])
         keyboard.append([InlineKeyboardButton("🔙 Volver a Películas", callback_data="cat_peliculas")])
         await editar_o_enviar(
             query,
@@ -1118,6 +1119,137 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
         logger.error(f"Error mostrando películas de saga: {e}", exc_info=True)
         await editar_o_enviar(query, "❌ No se pudo cargar esta saga.")
  
+async def gestionar_envio_saga(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    try:
+        if data.startswith("sagaenv_chat_"):
+            modo = "chat"
+            saga_id = int(data[len("sagaenv_chat_"):])
+        elif data.startswith("sagaenv_priv_"):
+            modo = "priv"
+            saga_id = int(data[len("sagaenv_priv_"):])
+        elif data.startswith("sagaenv_"):
+            saga_id = int(data[len("sagaenv_"):])
+            sql_nombre = f"SELECT nombre FROM sagas WHERE id = {saga_id} LIMIT 1"
+            res_nombre = await ejecutar_turso_sql([sql_nombre])
+            filas_nombre = res_nombre.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            if not filas_nombre:
+                await editar_o_enviar(query, "⚠️ Esta saga ya no está disponible.")
+                return
+            nombre_saga = str(filas_nombre[0][0].get("value", "Saga"))
+            keyboard = [[
+                InlineKeyboardButton("💬 En este chat", callback_data=f"sagaenv_chat_{saga_id}"),
+                InlineKeyboardButton("🔒 En mensaje privado", callback_data=f"sagaenv_priv_{saga_id}")
+            ]]
+            await editar_o_enviar(
+                query,
+                f"📍 ¿Dónde prefieres recibir la saga *{nombre_saga}* completa?",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            return
+
+        if saga_id <= 0:
+            await editar_o_enviar(query, "❌ Saga no válida.")
+            return
+
+        sql = (
+            "SELECT s.nombre, p.file_id, p.titulo "
+            "FROM sagas s "
+            "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
+            "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
+            f"WHERE s.id = {saga_id} AND p.temporada = 'General'"
+        )
+        resultado = await ejecutar_turso_sql([sql])
+        filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        peliculas = []
+        nombre_saga = "Saga"
+        for fila in filas:
+            if len(fila) < 3:
+                continue
+            nombre_saga = str(fila[0].get("value", "Saga"))
+            file_id = str(fila[1].get("value", "") or "")
+            titulo = str(fila[2].get("value", "") or "").strip()
+            if not file_id or file_id == "None" or not titulo:
+                continue
+            anio = extraer_anio_titulo(titulo)
+            peliculas.append((
+                0 if anio else 1,
+                int(anio) if anio else 9999,
+                normalizar_busqueda(titulo),
+                titulo,
+                file_id
+            ))
+
+        peliculas.sort(key=lambda item: (item[0], item[1], item[2]))
+        if not peliculas:
+            await editar_o_enviar(query, "⚠️ Esta saga no tiene archivos disponibles para enviar.")
+            return
+
+        user_id = query.from_user.id
+        destino = user_id if modo == "priv" else query.message.chat_id
+        aviso = None
+        if modo == "chat":
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            aviso = await context.bot.send_message(
+                chat_id=destino,
+                text=f"🎞️ Enviando saga completa: {nombre_saga} ({len(peliculas)} películas)..."
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=destino,
+                text=f"🎞️ Aquí tienes la saga completa: {nombre_saga}"
+            )
+
+        enviados = 0
+        errores = 0
+        try:
+            for _, _, _, titulo, file_id in peliculas:
+                try:
+                    await context.bot.send_video(
+                        chat_id=destino,
+                        video=file_id,
+                        caption=f"📁 {titulo}"
+                    )
+                    enviados += 1
+                except Exception as e_envio:
+                    errores += 1
+                    logger.error(
+                        f"No se pudo enviar la película {titulo!r} de la saga {saga_id}: {e_envio}",
+                        exc_info=True
+                    )
+        finally:
+            if aviso:
+                try:
+                    await aviso.delete()
+                except Exception as e_delete:
+                    logger.warning(f"No se pudo borrar el aviso de envío de saga: {e_delete}")
+
+        if modo == "priv":
+            resumen = f"✅ Saga enviada al privado: {enviados}/{len(peliculas)} películas."
+            if errores:
+                resumen += f" No se pudieron enviar {errores}."
+            await editar_o_enviar(query, resumen)
+        elif errores:
+            await context.bot.send_message(
+                chat_id=destino,
+                text=f"⚠️ Envío terminado: {enviados}/{len(peliculas)} películas enviadas; {errores} fallaron."
+            )
+    except ValueError:
+        await editar_o_enviar(query, "❌ Saga no válida.")
+    except Exception as e:
+        logger.error(f"Error al enviar saga completa: {e}", exc_info=True)
+        await editar_o_enviar(query, "❌ No se pudo completar el envío de la saga.")
+
+
 async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -2559,6 +2691,7 @@ def main() -> None:
 
     application.add_handler(CallbackQueryHandler(mostrar_catalogo_peliculas, pattern="^cat_peliculas"))
     application.add_handler(CallbackQueryHandler(mostrar_peliculas_saga, pattern="^sagacat_"))
+    application.add_handler(CallbackQueryHandler(gestionar_envio_saga, pattern="^sagaenv_"))
     application.add_handler(CallbackQueryHandler(mostrar_catalogo_series, pattern="^cat_series"))
     application.add_handler(CallbackQueryHandler(mostrar_temporadas_serie, pattern="^seriestemp_"))
     application.add_handler(CallbackQueryHandler(catalogo_volver_inicio, pattern="^catalogo_volver_inicio$"))
