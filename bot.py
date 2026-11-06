@@ -793,6 +793,23 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         return "Sin Título"
 
     titulo = lineas[0]
+    # Quitar etiquetas de idioma/calidad después de "|" (por ejemplo, "| VOSE").
+    titulo = re.sub(
+        r"\s*\|\s*(?:VOSE|VOS|SUB(?:TITULAD[AO])?|LATINO|CASTELLANO|ESPAÑOL|ESPA[NÑ]OL|"
+        r"DUAL|HD|FHD|UHD|4K|1080P|720P)\s*$",
+        "",
+        titulo,
+        flags=re.IGNORECASE
+    ).strip()
+    # Si el año viene en una línea aparte, incorporarlo al título.
+    if not re.search(r"\b\d{4}\b", titulo):
+        anio_en_lineas = next(
+            (m.group(1) for linea in lineas[1:]
+             if (m := re.search(r"\b(19\d{2}|20\d{2})\b", linea))),
+            None
+        )
+        if anio_en_lineas:
+            titulo = f"{titulo} {anio_en_lineas}"
     # Quitar emojis y adornos al principio (por ejemplo: "🌟 • Título").
     while titulo and unicodedata.category(titulo[0]).startswith(("S", "P")):
         titulo = titulo[1:].lstrip()
