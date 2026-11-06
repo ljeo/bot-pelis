@@ -1983,7 +1983,13 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 temporada = str(row[1]["value"]) if len(row) > 1 and "value" in row[1] else "General"
                 titulo_encontrado = str(row[2]["value"]) if len(row) > 2 and "value" in row[2] else texto_args
                 
-                nombre_base = titulo_encontrado.split(" (")[0].strip() if " (" in titulo_encontrado else titulo_encontrado.strip()
+                nombre_base = (
+                    titulo_encontrado.split(" (", 1)[0].strip()
+                    if " (" in titulo_encontrado
+                    else titulo_encontrado.strip()
+                )
+                if temporada != "General":
+                    nombre_base = extraer_nombre_base_serie(nombre_base)
                 clave_unica = f"{nombre_base.lower()}_{temporada.lower()}"
                 if clave_unica in titulos_vistos:
                     continue
