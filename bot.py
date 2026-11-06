@@ -1908,7 +1908,7 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
             else:
                 # Para películas, compara el título completo ignorando el año
                 # y signos de puntuación, pero nunca fragmentos internos.
-                titulo_sin_anio = re.sub(r"\\b(?:19|20)\\d{2}\\b", "", titulo_fila)
+                titulo_sin_anio = re.sub(r"\b(?:19|20)\d{2}\b", "", titulo_fila)
                 titulo_exactamente = re.sub(
                     r"[^a-z0-9]", "", normalizar_busqueda(titulo_sin_anio)
                 )
