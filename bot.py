@@ -1696,12 +1696,137 @@ async def iniciar_guardado_saga(update: Update, context: ContextTypes.DEFAULT_TY
     if not context.user_data.get("pending_file_id") or not context.user_data.get("pending_titulo"):
         await editar_o_enviar(query, "❌ La sesión expiró. Ejecuta /guardar nuevamente.")
         return
+
+    try:
+        chat_id = str(query.message.chat_id).replace("'", "''")
+        sql = (
+            "SELECT id, nombre FROM sagas "
+            f"WHERE chat_id = '{chat_id}' ORDER BY nombre COLLATE NOCASE"
+        )
+        resultado = await ejecutar_turso_sql([sql])
+        filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        keyboard = []
+        for fila in filas:
+            if len(fila) < 2:
+                continue
+            saga_id = str(fila[0].get("value", ""))
+            nombre = str(fila[1].get("value", "")).strip()
+            if saga_id.isdigit() and nombre:
+                keyboard.append([InlineKeyboardButton(f"🎞️ {nombre}", callback_data=f"saga_agregar_{saga_id}")])
+        keyboard.append([InlineKeyboardButton("➕ Crear saga nueva", callback_data="saga_crear_nueva")])
+        keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="saga_cancelar")])
+        mensaje = "🎞️ **Selecciona una saga existente o crea una nueva:**"
+        if not filas:
+            mensaje = "🎞️ **Todavía no tienes sagas. Puedes crear la primera:**"
+        await editar_o_enviar(query, mensaje, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        logger.error(f"Error cargando sagas para agregar película: {e}", exc_info=True)
+        await editar_o_enviar(query, "❌ No se pudieron cargar las sagas. Inténtalo nuevamente.")
+
+
+async def crear_saga_nueva_desde_guardado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not await es_admin(query.from_user.id):
+        await editar_o_enviar(query, "⛔ No tienes permisos para realizar esta acción.")
+        return
+    if not context.user_data.get("pending_file_id") or not context.user_data.get("pending_titulo"):
+        await editar_o_enviar(query, "❌ La sesión expiró. Ejecuta /guardar nuevamente.")
+        return
     context.user_data["esperando_nombre_saga"] = True
     await editar_o_enviar(
         query,
-        "🎞️ **Película de una saga**\n\nEscribe el nombre de la saga (por ejemplo: *Harry Potter*).\nEnvía /cancelar para salir.",
+        "🎞️ **Crear saga nueva**\n\nEscribe el nombre de la saga.\nEnvía /cancelar para salir.",
         parse_mode="Markdown"
     )
+
+
+async def agregar_pelicula_saga_existente(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not await es_admin(query.from_user.id):
+        await editar_o_enviar(query, "⛔ No tienes permisos para realizar esta acción.")
+        return
+
+    file_id = str(context.user_data.get("pending_file_id") or "")
+    titulo_base = str(context.user_data.get("pending_titulo") or "")
+    if not file_id or not titulo_base:
+        await editar_o_enviar(query, "❌ La sesión expiró. Ejecuta /guardar nuevamente.")
+        return
+
+    data = str(query.data or "")
+    saga_id_raw = data.replace("saga_agregar_", "", 1)
+    if not saga_id_raw.isdigit():
+        await editar_o_enviar(query, "⚠️ La saga seleccionada no es válida.")
+        return
+
+    try:
+        chat_id = str(query.message.chat_id).replace("'", "''")
+        saga_id = int(saga_id_raw)
+        saga_sql = (
+            f"SELECT nombre FROM sagas WHERE id = {saga_id} "
+            f"AND chat_id = '{chat_id}' LIMIT 1"
+        )
+        res_saga = await ejecutar_turso_sql([saga_sql])
+        filas_saga = res_saga.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if not filas_saga:
+            await editar_o_enviar(query, "⚠️ Esa saga ya no existe. Vuelve a abrir la lista.")
+            return
+        nombre_saga = str(filas_saga[0][0].get("value", "Saga")).strip()
+
+        titulo_limpio = limpiar_titulo_pelicula(titulo_base)
+        titulo_escaped = titulo_limpio.replace("'", "''")
+        file_id_escaped = file_id.replace("'", "''")
+        sql_dup = (
+            f"SELECT id FROM peliculas WHERE file_id = '{file_id_escaped}' "
+            f"OR (LOWER(titulo) = LOWER('{titulo_escaped}') AND temporada = 'General')"
+        )
+        res_dup = await ejecutar_turso_sql([sql_dup])
+        rows_dup = res_dup.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if rows_dup:
+            context.user_data.pop("pending_file_id", None)
+            context.user_data.pop("pending_titulo", None)
+            await editar_o_enviar(query, "⚠️ Esta película o archivo ya está registrado. No se añadió a la saga.")
+            return
+
+        chat_escaped = chat_id
+        await ejecutar_turso_batch_atomico([
+            (
+                "INSERT INTO peliculas (chat_id, titulo, file_id, temporada) "
+                f"VALUES ('{chat_escaped}', '{titulo_escaped}', '{file_id_escaped}', 'General')"
+            ),
+            (
+                "INSERT INTO saga_peliculas (saga_id, pelicula_id) "
+                "SELECT " + str(saga_id) + ", p.id FROM peliculas p "
+                f"WHERE p.file_id = '{file_id_escaped}' AND p.chat_id = '{chat_escaped}' "
+                "ORDER BY p.id DESC LIMIT 1"
+            )
+        ])
+
+        context.user_data.pop("pending_file_id", None)
+        context.user_data.pop("pending_titulo", None)
+        context.user_data.pop("esperando_nombre_saga", None)
+        try:
+            await notificar_solicitudes_resueltas(titulo_limpio, "General", context)
+        except Exception as e_notif:
+            logger.error(f"Error notificando solicitudes resueltas: {e_notif}", exc_info=True)
+        await editar_o_enviar(
+            query,
+            f"✅ Película añadida a la saga *{nombre_saga}*:\n🎬 {titulo_limpio}",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error añadiendo película a saga existente: {e}", exc_info=True)
+        await editar_o_enviar(query, "❌ No se pudo añadir la película. El archivo permanece pendiente; vuelve a intentarlo.")
+
+
+async def cancelar_seleccion_saga(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("pending_file_id", None)
+    context.user_data.pop("pending_titulo", None)
+    context.user_data.pop("esperando_nombre_saga", None)
+    await editar_o_enviar(query, "❎ Se canceló el guardado de la película.")
 
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2924,6 +3049,9 @@ def main() -> None:
 
     application.add_handler(CallbackQueryHandler(boton_idioma, pattern="^lang_"))
     application.add_handler(CallbackQueryHandler(iniciar_guardado_saga, pattern="^saga_nueva$"))
+    application.add_handler(CallbackQueryHandler(crear_saga_nueva_desde_guardado, pattern="^saga_crear_nueva$"))
+    application.add_handler(CallbackQueryHandler(agregar_pelicula_saga_existente, pattern="^saga_agregar_\\d+$"))
+    application.add_handler(CallbackQueryHandler(cancelar_seleccion_saga, pattern="^saga_cancelar$"))
     application.add_handler(CallbackQueryHandler(boton_temporada_guardar, pattern="^temp_"))
     application.add_handler(CallbackQueryHandler(seleccionar_destino_envio, pattern="^seltemp_"))
     application.add_handler(CallbackQueryHandler(boton_ver_episodio, pattern="^(send_chat_|send_priv_)"))
