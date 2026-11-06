@@ -833,7 +833,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
             pagina = 0
     ITEMS_POR_PAGINA = 8
     try:
-        sql = f"SELECT id, titulo FROM peliculas WHERE chat_id = '{chat_id}' AND temporada = 'General' ORDER BY id DESC"
+        sql = f"SELECT id, titulo FROM peliculas WHERE chat_id = '{chat_id}' ORDER BY id DESC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
@@ -848,7 +848,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
                 "FROM sagas s "
                 "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
                 "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-                f"WHERE s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id AND p.temporada = 'General' "
+                f"WHERE s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id "
                 "ORDER BY s.nombre, p.titulo"
             )
             res_sagas = await ejecutar_turso_sql([sql_sagas])
