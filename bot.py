@@ -2193,8 +2193,21 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     keyboard.append(btn_tuple)
 
             reply_markup = InlineKeyboardMarkup(keyboard)
+            if patron_pelicula:
+                mensaje_disponible = (
+                    f"🎉 **¡Buenas noticias!** La película solicitada ya está registrada: "
+                    f"*{titulo_solicitado} {patron_pelicula.group(2)}*\n\n"
+                    "Pulsa el botón para abrir el catálogo:"
+                )
+            else:
+                mensaje_disponible = (
+                    f"🎉 **¡Buenas noticias!** La temporada solicitada ya está registrada: "
+                    f"*{titulo_solicitado} - {temporada_solicitada}*\n\n"
+                    "Pulsa el botón para abrir el catálogo:"
+                )
+
             await update.message.reply_text(
-                f"🎉 **¡Buenas noticias!** La temporada solicitada ya está registrada: *{titulo_solicitado} - {temporada_solicitada}*\n\nPulsa el botón para abrir el catálogo:",
+                mensaje_disponible,
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
             )
