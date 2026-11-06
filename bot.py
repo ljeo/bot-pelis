@@ -616,6 +616,20 @@ def clave_serie_catalogo(titulo: str) -> str:
     return "".join(c.lower() for c in nombre if c.isalnum())
 
 
+def numero_temporada_catalogo(temporada: str, titulo: str = ""):
+    """Obtiene el número de temporada; infiere el dato del marcador del episodio si falta."""
+    coincidencia = re.search(r"temporada\\s*(\\d+)", temporada or "", re.IGNORECASE)
+    if coincidencia:
+        return int(coincidencia.group(1))
+    coincidencia = re.search(
+        r"\\b(\\d{1,2})[xX]\\d{1,2}\\b|\\b[Ss](\\d{1,2})[Ee]\\d{1,2}\\b",
+        titulo or ""
+    )
+    if coincidencia:
+        return int(coincidencia.group(1) or coincidencia.group(2))
+    return None
+
+
 def titulo_capitulo_para_envio(titulo: str) -> str:
     """Muestra el episodio sin paréntesis, aunque se almacene en formato canónico."""
     return re.sub(
@@ -1202,7 +1216,7 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
             pagina = 0
     ITEMS_POR_PAGINA = 8
     try:
-        sql = "SELECT id, titulo, temporada FROM peliculas WHERE temporada != 'General' ORDER BY id DESC"
+        sql = "SELECT id, titulo, temporada FROM peliculas ORDER BY id DESC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
@@ -1213,8 +1227,17 @@ async def mostrar_catalogo_series(update: Update, context: ContextTypes.DEFAULT_
             titulo = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else ""
             if not id_registro or not titulo:
                 continue
+            temporada_registro = str(row[2]["value"]) if len(row) > 2 and row[2].get("value") is not None else "General"
             nombre_base = extraer_nombre_base_serie(titulo)
             clave = clave_serie_catalogo(titulo)
+            # Recupera episodios con marcador explícito aunque se hubieran guardado
+            # inicialmente como "General" desde el guardado manual.
+            es_episodio = bool(re.search(
+                r"\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[Ss]\\d{1,2}[Ee]\\d{1,2}\\b",
+                titulo
+            ))
+            if temporada_registro == "General" and not es_episodio:
+                continue
             if not nombre_base or not clave or clave in vistos:
                 continue
             vistos.add(clave)
@@ -1268,7 +1291,7 @@ async def mostrar_temporadas_serie(update: Update, context: ContextTypes.DEFAULT
         else:
             return
         clave_buscada = clave_serie_catalogo(nombre_serie)
-        sql = "SELECT id, titulo, temporada FROM peliculas WHERE temporada != 'General' ORDER BY id ASC"
+        sql = "SELECT id, titulo, temporada FROM peliculas ORDER BY id ASC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
@@ -1278,10 +1301,16 @@ async def mostrar_temporadas_serie(update: Update, context: ContextTypes.DEFAULT
             id_registro = str(row[0]["value"]) if len(row) > 0 and row[0].get("value") is not None else ""
             titulo_registro = str(row[1]["value"]) if len(row) > 1 and row[1].get("value") is not None else ""
             temp = str(row[2]["value"]) if len(row) > 2 and row[2].get("value") is not None else "Temporada 1"
-            if not id_registro or clave_serie_catalogo(titulo_registro) != clave_buscada or temp in temporadas_vistas:
+            if not id_registro or clave_serie_catalogo(titulo_registro) != clave_buscada:
                 continue
-            temporadas_vistas.add(temp)
-            keyboard.append([InlineKeyboardButton(f"📁 {temp}", callback_data=f"seltemp_id_{id_registro}_{temp}")])
+            numero_temp = numero_temporada_catalogo(temp, titulo_registro)
+            if numero_temp is None:
+                continue
+            temporada_canonica = f"Temporada {numero_temp}"
+            if temporada_canonica in temporadas_vistas:
+                continue
+            temporadas_vistas.add(temporada_canonica)
+            keyboard.append([InlineKeyboardButton(f"📁 {temporada_canonica}", callback_data=f"seltemp_id_{id_registro}_{temporada_canonica}")])
         keyboard.append([InlineKeyboardButton("🔙 Volver a Series", callback_data="cat_series")])
         await editar_o_enviar(query, f"📺 **{nombre_serie}**\n\nSelecciona la temporada que deseas ver:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     except Exception as e:
@@ -2323,16 +2352,23 @@ async def seleccionar_destino_envio(update: Update, context: ContextTypes.DEFAUL
             if temporada == "General":
                 sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
             else:
-                sql = f"SELECT file_id, titulo FROM peliculas WHERE temporada = '{temp_escaped}' ORDER BY id ASC"
+                # No depender del texto exacto de temporada: episodios antiguos pueden
+                # tener "General" o variantes como "Temporada 01".
+                sql = "SELECT file_id, titulo, temporada FROM peliculas ORDER BY id ASC"
             resultado = await ejecutar_turso_sql([sql])
             results_list = resultado.get("results", [])
             rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
             if temporada != "General":
                 clave_buscada = clave_serie_catalogo(titulo_busqueda)
+                numero_temp_buscada = numero_temporada_catalogo(temporada)
                 rows = [
                     row for row in rows
                     if len(row) > 1
                     and clave_serie_catalogo(str(row[1].get("value", ""))) == clave_buscada
+                    and numero_temporada_catalogo(
+                        str(row[2].get("value", "")) if len(row) > 2 else "General",
+                        str(row[1].get("value", ""))
+                    ) == numero_temp_buscada
                 ]
                 rows = ordenar_episodios(rows)
             if rows:
@@ -2419,16 +2455,21 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if temporada == "General":
             sql = f"SELECT file_id, titulo FROM peliculas WHERE LOWER(titulo) = '{titulo_escaped}' AND temporada = 'General'"
         else:
-            sql = f"SELECT file_id, titulo FROM peliculas WHERE temporada = '{temp_escaped}' ORDER BY id ASC"
+            sql = "SELECT file_id, titulo, temporada FROM peliculas ORDER BY id ASC"
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
         rows = results_list[0]["response"].get("result", {}).get("rows", []) if results_list and "response" in results_list[0] else []
         if temporada != "General":
             clave_buscada = clave_serie_catalogo(titulo_busqueda)
+            numero_temp_buscada = numero_temporada_catalogo(temporada)
             rows = [
                 row for row in rows
                 if len(row) > 1
                 and clave_serie_catalogo(str(row[1].get("value", ""))) == clave_buscada
+                and numero_temporada_catalogo(
+                    str(row[2].get("value", "")) if len(row) > 2 else "General",
+                    str(row[1].get("value", ""))
+                ) == numero_temp_buscada
             ]
         if temporada != "General" and rows:
             def clave_orden_capitulo(row):
