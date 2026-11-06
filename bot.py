@@ -706,6 +706,8 @@ def limpiar_titulo_pelicula(caption: str) -> str:
         return "Sin Título"
 
     titulo = lineas[0]
+    # Si hay dos títulos en idiomas distintos separados por ' / ', conservar el primero.
+    titulo = re.split(r"\\s+/\\s+", titulo, maxsplit=1)[0].strip()
 
     # Quitar etiquetas técnicas al final (resolución, calidad y formatos).
     titulo = re.sub(
