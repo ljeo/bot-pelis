@@ -1953,8 +1953,13 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
 
         token = secrets.token_hex(4)
         context.user_data.setdefault("delete_queries", {})[token] = query_texto
+        context.user_data.setdefault("delete_movie_ids", {})[token] = [
+            int(r[0].get("value")) for r in peliculas if r[0].get("value") is not None
+        ]
         while len(context.user_data["delete_queries"]) > 20:
-            context.user_data["delete_queries"].pop(next(iter(context.user_data["delete_queries"])))
+            token_expirado = next(iter(context.user_data["delete_queries"]))
+            context.user_data["delete_queries"].pop(token_expirado)
+            context.user_data.get("delete_movie_ids", {}).pop(token_expirado, None)
 
         keyboard = []
         if peliculas:
@@ -2013,13 +2018,16 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
         if not query_texto:
             await editar_o_enviar(query, "⚠️ La búsqueda expiró. Ejecuta /eliminar nuevamente.")
             return
-        q = query_texto.replace("'", "''").lower()
+        ids_peliculas = context.user_data.get("delete_movie_ids", {}).get(token, [])
+        if not ids_peliculas:
+            await editar_o_enviar(query, "⚠️ No hay películas individuales seleccionadas en esta búsqueda.")
+            return
         try:
-            res = await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada = 'General'"])
-            rows = res.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
-            count = int(rows[0][0].get("value", 0)) if rows else 0
-            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE LOWER(titulo) LIKE '%{q}%' AND temporada = 'General'"])
-            await editar_o_enviar(query, f"✅ Película eliminada.\n🗑️ Archivos borrados: {count}", parse_mode="Markdown")
+            ids_sql = ",".join(str(int(pelicula_id)) for pelicula_id in ids_peliculas)
+            await ejecutar_turso_sql([
+                f"DELETE FROM peliculas WHERE id IN ({ids_sql}) AND temporada = 'General'"
+            ])
+            await editar_o_enviar(query, f"✅ Película eliminada.\n🗑️ Archivos borrados: {len(ids_peliculas)}", parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Error eliminando película: {e}", exc_info=True)
             await editar_o_enviar(query, "❌ No se pudo eliminar la película.")
