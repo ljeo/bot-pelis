@@ -868,7 +868,7 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
         filtro_chats = ", ".join(f"'{id_chat}'" for id_chat in sorted(ids_catalogo))
         sql = (
             "SELECT id, titulo FROM peliculas "
-            f"WHERE chat_id IN ({filtro_chats}) ORDER BY id DESC"
+            f"WHERE chat_id IN ({filtro_chats}) AND temporada = 'General' ORDER BY id DESC"
         )
         resultado = await ejecutar_turso_sql([sql])
         results_list = resultado.get("results", [])
