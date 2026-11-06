@@ -354,6 +354,55 @@ async def init_db() -> None:
             exc_info=True
         )
 
+    # Migración puntual: unificar los episodios de "Chespirito: Sin querer queriendo"
+    # que antes se guardaron con variantes como "Chespirito 1x08".
+    try:
+        clave_migracion_chespirito = "migracion_chespirito_sin_querer_queriendo_v1"
+        res_chespirito = await ejecutar_turso_sql([
+            f"SELECT valor FROM config WHERE clave = '{clave_migracion_chespirito}'"
+        ])
+        filas_chespirito = res_chespirito.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+        if not (filas_chespirito and filas_chespirito[0][0].get("value") == "ok"):
+            res_registros = await ejecutar_turso_sql([
+                "SELECT id, titulo FROM peliculas WHERE temporada != 'General' OR temporada IS NULL"
+            ])
+            filas_registros = res_registros.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+            cambios_chespirito = []
+            for fila in filas_registros:
+                if len(fila) < 2 or fila[0].get("value") is None:
+                    continue
+                titulo_actual = str(fila[1].get("value") or "")
+                nombre_base = extraer_nombre_base_serie(titulo_actual)
+                clave_base = clave_serie_catalogo(titulo_actual)
+                if not clave_base.startswith("chespirito"):
+                    continue
+                marcador = re.search(
+                    r"\b(?:(\d{1,2})[xX](\d{1,2})|[Ss](\d{1,2})[Ee](\d{1,2}))\b",
+                    titulo_actual,
+                    re.IGNORECASE
+                )
+                if not marcador:
+                    continue
+                temporada_num = int(marcador.group(1) or marcador.group(3))
+                episodio_num = int(marcador.group(2) or marcador.group(4))
+                titulo_nuevo = f"Chespirito: Sin querer queriendo ({temporada_num}x{episodio_num:02d})"
+                if titulo_nuevo != titulo_actual:
+                    titulo_sql = titulo_nuevo.replace("'", "''")
+                    cambios_chespirito.append(
+                        f"UPDATE peliculas SET titulo = '{titulo_sql}' WHERE id = {int(fila[0]['value'])}"
+                    )
+            for inicio in range(0, len(cambios_chespirito), 50):
+                await ejecutar_turso_sql(cambios_chespirito[inicio:inicio + 50])
+            await ejecutar_turso_sql([
+                "INSERT OR REPLACE INTO config (clave, valor) "
+                f"VALUES ('{clave_migracion_chespirito}', 'ok')"
+            ])
+            logger.info(
+                f"Migración de Chespirito completada: {len(cambios_chespirito)} episodios unificados."
+            )
+    except Exception as e_chespirito:
+        logger.error(f"No se pudo completar la migración de Chespirito: {e_chespirito}", exc_info=True)
+
     logger.info("Base de datos y tablas verificadas correctamente.")
 
 async def es_admin(user_id: int) -> bool:
