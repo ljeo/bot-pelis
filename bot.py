@@ -3085,13 +3085,14 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    pregunta = " ".join(context.args).strip()
+    context.user_data["ia_activa"] = True
+    pregunta = " ".join(context.args).strip() or context.user_data.pop("ia_pregunta_pendiente", "").strip()
     if not pregunta:
         await update.message.reply_text(
             "🤖 ¡Hola! Soy el asistente de bot-pelis.\n\n"
-            "Escríbeme tu pregunta después del comando.\n"
-            "Ejemplo: /ia Recomiéndame películas de ciencia ficción.\n\n"
-            "Puedes seguir conversando usando /ia en cada mensaje. Usa /finia para borrar la conversación."
+            "La IA está activada. Ya puedes escribirme tus preguntas como mensajes normales, sin repetir /ia.\n"
+            "También puedes preguntar directamente con /ia seguido de tu pregunta.\n\n"
+            "Usa /apagar para desactivar la IA y borrar la conversación."
         )
         return
     if len(pregunta) > 1000:
@@ -3188,11 +3189,23 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("❌ Ocurrió un error al consultar el asistente.")
 
 
+async def responder_texto_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Envía a Gemini los mensajes normales mientras la IA esté activada para este usuario."""
+    if not update.message or not update.effective_user:
+        return
+    if not context.user_data.get("ia_activa", False):
+        return
+    context.user_data["ia_pregunta_pendiente"] = update.message.text or ""
+    await comando_ia(update, context)
+
+
 async def finalizar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
+    context.user_data["ia_activa"] = False
+    context.user_data.pop("ia_pregunta_pendiente", None)
     context.user_data.pop("ia_historial", None)
-    await update.message.reply_text("🧹 Conversación con la IA borrada. Puedes empezar otra con /ia.")
+    await update.message.reply_text("🧹 IA desactivada y conversación borrada. Puedes volver a activarla con /ia.")
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3204,6 +3217,7 @@ async def post_init(application) -> None:
         BotCommand("start", "Inicia el bot / Menú principal"),
         BotCommand("ia", "Habla con el asistente de inteligencia artificial"),
         BotCommand("finia", "Borra la conversación con la IA"),
+        BotCommand("apagar", "Desactiva el asistente de IA"),
         BotCommand("buscar", "Busca películas, series o animes"),
         BotCommand("pedir", "Solicita o verifica una película o serie"),
         BotCommand("guardar", "Guarda un video (responde a un archivo)"),
@@ -3233,6 +3247,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ia", comando_ia))
     application.add_handler(CommandHandler("finia", finalizar_ia))
+    application.add_handler(CommandHandler("apagar", finalizar_ia))
     application.add_handler(CommandHandler("idioma", configurar_idioma))
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
     application.add_handler(CommandHandler("buscar", buscar_pelicula))
@@ -3246,6 +3261,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(callback_menu_bienvenida, pattern="^cfg_"))
     application.add_handler(CallbackQueryHandler(settings_callback, pattern="^set_"))
     application.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, manejar_captura_config))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder_texto_ia), group=1)
 
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.VIDEO, guardar_desde_canal))
 
