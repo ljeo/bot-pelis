@@ -675,15 +675,9 @@ def limpiar_titulo_pelicula(caption: str) -> str:
     if not lineas:
         return "Sin Título"
 
-    titulo = lineas[0]
-    # Quitar etiquetas de idioma/calidad después de "|" (por ejemplo, "| VOSE").
-    titulo = re.sub(
-        r"\s*\|\s*(?:VOSE|VOS|SUB(?:TITULAD[AO])?|LATINO|CASTELLANO|ESPAÑOL|ESPA[NÑ]OL|"
-        r"DUAL|HD|FHD|UHD|4K|1080P|720P)\s*$",
-        "",
-        titulo,
-        flags=re.IGNORECASE
-    ).strip()
+    # La primera barra separa el título de los metadatos (audio, idioma,
+    # subtítulos, calidad, etc.). Conservar únicamente el título y el año.
+    titulo = lineas[0].split("|", 1)[0].strip()
     # Si el año viene en una línea aparte, incorporarlo al título.
     if not re.search(r"\b\d{4}\b", titulo):
         anio_en_lineas = next(
@@ -2075,10 +2069,19 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
                 # Para películas, compara el título completo ignorando el año
                 # y signos de puntuación, pero nunca fragmentos internos.
                 titulo_sin_anio = re.sub(r"\b(?:19|20)\d{2}\b", "", titulo_fila)
-                titulo_exactamente = re.sub(
-                    r"[^a-z0-9]", "", normalizar_busqueda(titulo_sin_anio)
+                titulo_normalizado = normalizar_busqueda(titulo_sin_anio)
+                titulo_exactamente = re.sub(r"[^a-z0-9]", "", titulo_normalizado)
+                # Aceptar el título completo o una búsqueda formada por sus
+                # primeras palabras completas, para encontrar títulos con subtítulo.
+                palabras_consulta = consulta.split()
+                palabras_titulo = titulo_normalizado.split()
+                coincide = bool(consulta_exacta) and (
+                    consulta_exacta == titulo_exactamente
+                    or (
+                        len(palabras_consulta) <= len(palabras_titulo)
+                        and palabras_titulo[:len(palabras_consulta)] == palabras_consulta
+                    )
                 )
-                coincide = bool(consulta_exacta) and consulta_exacta == titulo_exactamente
             if coincide:
                 rows.append(r)
         rows.sort(key=lambda r: normalizar_busqueda(str(r[1].get("value",""))))
