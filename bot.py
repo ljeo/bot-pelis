@@ -3430,37 +3430,76 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         registro["cantidad"] += 1
         estado[user_key] = registro
 
-        # La disponibilidad se comprueba en Turso, no por lo que diga Gemini.
-        # Los botones reutilizan el callback real de /buscar para entregar archivos.
+        # Los botones se generan exclusivamente desde registros reales de Turso.
+        # Solo se muestran cuando el usuario pide contenido, no ante preguntas informativas.
         pregunta_normalizada = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(pregunta)).strip()
+        pide_contenido = bool(re.search(
+            r"\b(?:quiero|dame|envia(?:me)?|mandame|pasame|ver|busco|buscar|ponme|muestrame|mostrar|descargar)\b",
+            pregunta_normalizada
+        ))
+        pide_saga = bool(re.search(r"\b(?:saga|coleccion completa|todas las peliculas)\b", pregunta_normalizada))
         keyboard_ia = []
         vistos_ia = set()
-        for id_registro, temporada, titulo_registro in registros_catalogo:
-            if temporada == "General":
-                nombre_catalogo = re.sub(r"\s*\([^)]*\)", " ", titulo_registro)
-                nombre_catalogo = re.sub(r"\b(?:19|20)\d{2}\b", " ", nombre_catalogo)
-            else:
-                nombre_catalogo = extraer_nombre_base_serie(titulo_registro)
-            nombre_normalizado = re.sub(
-                r"[^a-z0-9]+", " ",
-                normalizar_busqueda(nombre_catalogo)
-            ).strip()
-            if not nombre_normalizado:
-                continue
-            coincide = f" {nombre_normalizado} " in f" {pregunta_normalizada} "
-            if not coincide:
-                continue
-            clave = (nombre_normalizado, temporada.casefold())
-            if clave in vistos_ia:
-                continue
-            vistos_ia.add(clave)
-            if temporada == "General":
-                etiqueta = f"🎬 Ver: {titulo_para_boton_pelicula(titulo_registro)}"
-            else:
-                etiqueta = f"📺 Ver: {nombre_catalogo.strip()} - {temporada}"
-            keyboard_ia.append([
-                InlineKeyboardButton(etiqueta[:64], callback_data=f"seltemp_id_{id_registro}_{temporada}")
-            ])
+
+        def coincide_con_pedido(nombre):
+            nombre_norm = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(nombre)).strip()
+            if not nombre_norm:
+                return False
+            tokens = nombre_norm.split()
+            consulta = pregunta_normalizada.split()
+            anios = [t for t in tokens if re.fullmatch(r"(?:19|20)\d{2}", t)]
+            tokens_nombre = [t for t in tokens if t not in anios]
+            if not all(t in consulta for t in tokens_nombre):
+                return False
+            return not anios or all(anio in consulta for anio in anios)
+
+        if pide_contenido:
+            # Si solicita expresamente la saga, mostrar el botón de saga real.
+            if pide_saga:
+                try:
+                    chat_scope = str(update.effective_chat.id).replace("'", "''")
+                    res_sagas_ia = await ejecutar_turso_sql([
+                        "SELECT id, nombre FROM sagas "
+                        f"WHERE chat_id = '{chat_scope}' ORDER BY nombre"
+                    ])
+                    filas_sagas_ia = res_sagas_ia.get("results", [])[0]["response"]["result"].get("rows", [])
+                    for fila in filas_sagas_ia:
+                        saga_id = str(fila[0].get("value", ""))
+                        nombre_saga = str(fila[1].get("value", "")).strip()
+                        if saga_id and nombre_saga and coincide_con_pedido(nombre_saga):
+                            keyboard_ia.append([InlineKeyboardButton(
+                                f"🎞️ Ver saga: {nombre_saga}"[:64],
+                                callback_data=f"sagacat_{saga_id}"
+                            )])
+                except Exception as error_sagas_ia:
+                    logger.warning("No se pudieron consultar sagas para botones IA: %s", error_sagas_ia)
+
+            # Películas y series: resolver títulos exactos contra el catálogo consultado.
+            if not pide_saga or not keyboard_ia:
+                series_agregadas = set()
+                for id_registro, temporada, titulo_registro in registros_catalogo:
+                    if temporada == "General":
+                        nombre = re.sub(r"\s*\([^)]*\)", " ", titulo_registro).strip()
+                        if not coincide_con_pedido(nombre):
+                            continue
+                        clave = ("pelicula", id_registro)
+                        if clave in vistos_ia:
+                            continue
+                        vistos_ia.add(clave)
+                        keyboard_ia.append([InlineKeyboardButton(
+                            f"🎬 Ver: {titulo_para_boton_pelicula(titulo_registro)}"[:64],
+                            callback_data=f"seltemp_id_{id_registro}_General"
+                        )])
+                    else:
+                        nombre = extraer_nombre_base_serie(titulo_registro).strip()
+                        nombre_norm = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(nombre)).strip()
+                        if not nombre_norm or nombre_norm in series_agregadas or not coincide_con_pedido(nombre):
+                            continue
+                        series_agregadas.add(nombre_norm)
+                        keyboard_ia.append([InlineKeyboardButton(
+                            f"📺 Ver serie: {nombre}"[:64],
+                            callback_data=f"seriestemp_id_{id_registro}"
+                        )])
 
         candidato = extraer_candidato_peticion_ia(pregunta, respuesta_texto)
         if candidato:
