@@ -3782,7 +3782,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 t for t in consulta
                 if t not in palabras_ruido
                 and not re.fullmatch(r"(?:19|20)\d{2}", t)
-                and not re.fullmatch(r"\d{1,2}", t)
+                and not (t.isdigit() and "narnia" in consulta)
             ]
             tokens_nombre = [t for t in tokens if not re.fullmatch(r"(?:19|20)\d{2}", t)]
             if not terminos_pedidos or not all(t in tokens_nombre for t in terminos_pedidos):
