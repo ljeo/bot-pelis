@@ -30,8 +30,8 @@ TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 
 SUPER_ADMIN_ID = 6709726108  
 
@@ -3204,7 +3204,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not update.message or not update.effective_user:
         return
 
-    if not GROQ_API_KEY and not GEMINI_API_KEY:
+    if not OPENROUTER_API_KEY and not GEMINI_API_KEY:
         await update.message.reply_text(
             "🤖 El asistente todavía no está configurado. El administrador debe añadir GROQ_API_KEY o GEMINI_API_KEY en Render."
         )
@@ -3299,47 +3299,52 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         respuesta_texto = ""
         proveedor_usado = None
 
-        # Groq es el proveedor principal. Si falla o alcanza su cuota,
-        # se intenta Gemini sin cambiar el historial ni el resto del flujo.
-        if GROQ_API_KEY:
-            mensajes_groq = [{"role": "system", "content": instruccion}]
+        # OpenRouter usa exclusivamente su enrutador de modelos gratuitos.
+        # Si falla o no hay disponibilidad, se intenta Gemini como respaldo.
+        if OPENROUTER_API_KEY:
+            mensajes_openrouter = [{"role": "system", "content": instruccion}]
             for elemento in contenidos:
                 rol = "assistant" if elemento.get("role") == "model" else "user"
-                texto_elemento = "\n".join(
+                texto_elemento = "\\n".join(
                     parte.get("text", "") for parte in elemento.get("parts", [])
                     if isinstance(parte, dict) and parte.get("text")
                 ).strip()
                 if texto_elemento:
-                    mensajes_groq.append({"role": rol, "content": texto_elemento})
+                    mensajes_openrouter.append({"role": rol, "content": texto_elemento})
             try:
                 async with httpx.AsyncClient(timeout=35.0) as client:
-                    respuesta_groq = await client.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                    respuesta_openrouter = await client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": "https://github.com/ljeo/bot-pelis",
+                            "X-Title": "bot-pelis"
+                        },
                         json={
-                            "model": GROQ_MODEL,
-                            "messages": mensajes_groq,
-                            "max_completion_tokens": 700,
+                            "model": OPENROUTER_MODEL,
+                            "messages": mensajes_openrouter,
+                            "max_tokens": 700,
                             "temperature": 0.7
                         }
                     )
-                if respuesta_groq.status_code == 200:
-                    datos_groq = respuesta_groq.json()
+                if respuesta_openrouter.status_code == 200:
+                    datos_openrouter = respuesta_openrouter.json()
                     respuesta_texto = (
-                        datos_groq.get("choices", [{}])[0]
+                        datos_openrouter.get("choices", [{}])[0]
                         .get("message", {}).get("content", "")
                     ).strip()
                     if respuesta_texto:
-                        proveedor_usado = "Groq"
+                        proveedor_usado = "OpenRouter (modelo gratuito)"
                     else:
-                        logger.warning("Groq respondió sin texto; se probará Gemini.")
+                        logger.warning("OpenRouter respondió sin texto; se probará Gemini.")
                 else:
                     logger.warning(
-                        "Groq devolvió HTTP %s: %s. Se probará Gemini.",
-                        respuesta_groq.status_code, respuesta_groq.text[:400]
+                        "OpenRouter devolvió HTTP %s: %s. Se probará Gemini.",
+                        respuesta_openrouter.status_code, respuesta_openrouter.text[:400]
                     )
-            except Exception as error_groq:
-                logger.warning("Falló Groq; se probará Gemini: %s", error_groq)
+            except Exception as error_openrouter:
+                logger.warning("Falló OpenRouter; se probará Gemini: %s", error_openrouter)
 
         if not respuesta_texto and GEMINI_API_KEY:
             try:
