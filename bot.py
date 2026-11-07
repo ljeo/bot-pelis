@@ -850,22 +850,21 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         res_file = await ejecutar_turso_sql([sql_check_file])
         rows_file = res_file.get("results", [])[0]["response"].get("result", {}).get("rows", [])
         if rows_file:
-            # Si el mismo vídeo ya entró con un título mal interpretado, corregir
-            # su ficha usando el marcador explícito del caption actual.
-            if temporada != "General":
-                titulo_escaped = titulo_guardar.replace("'", "''")
-                temp_escaped = temporada.replace("'", "''")
-                chat_escaped = chat_id.replace("'", "''")
-                file_escaped = file_id.replace("'", "''")
-                await ejecutar_turso_sql([
-                    "UPDATE peliculas SET "
-                    f"titulo = '{titulo_escaped}', temporada = '{temp_escaped}', "
-                    f"chat_id = '{chat_escaped}' WHERE file_id = '{file_escaped}'"
-                ])
-                logger.info(
-                    f"Ficha de episodio existente normalizada desde el canal: "
-                    f"{titulo_guardar} - {temporada}"
-                )
+            # Si el mismo vídeo ya estaba registrado, actualizar también las
+            # películas: así se corrigen títulos antiguos con metadatos sobrantes.
+            titulo_escaped = titulo_guardar.replace("'", "''")
+            temp_escaped = temporada.replace("'", "''")
+            chat_escaped = chat_id.replace("'", "''")
+            file_escaped = file_id.replace("'", "''")
+            await ejecutar_turso_sql([
+                "UPDATE peliculas SET "
+                f"titulo = '{titulo_escaped}', temporada = '{temp_escaped}', "
+                f"chat_id = '{chat_escaped}' WHERE file_id = '{file_escaped}'"
+            ])
+            logger.info(
+                f"Ficha existente normalizada desde el canal: "
+                f"{titulo_guardar} - {temporada}"
+            )
             titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
             logger.info(f"Archivo ya registrado; se revisaron solicitudes pendientes: {raw_title}")
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
