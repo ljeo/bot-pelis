@@ -3537,6 +3537,47 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         context.user_data.pop("ia_peticion_pendiente", None)
 
+    # Caso puntual: "Narnia 1" debe resolverse contra el catálogo, sin pedir
+    # a la IA que improvise una recomendación o una sinopsis bilingüe.
+    consulta_narnia = normalizar_busqueda(pregunta)
+    if re.search(r"\bnarnia\b", consulta_narnia) and re.search(r"\b1\b", consulta_narnia) and re.search(
+        r"\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame)\b", consulta_narnia
+    ):
+        try:
+            resultado_narnia = await ejecutar_turso_sql([
+                "SELECT id, temporada, titulo FROM peliculas ORDER BY id DESC"
+            ])
+            filas_narnia = resultado_narnia.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            botones_narnia = []
+            vistos_narnia = set()
+            for fila in filas_narnia:
+                rid = str(fila[0].get("value", "")) if len(fila) > 0 else ""
+                temp = str(fila[1].get("value", "General")) if len(fila) > 1 else "General"
+                titulo = str(fila[2].get("value", "")) if len(fila) > 2 else ""
+                if not rid or temp != "General":
+                    continue
+                clave_titulo = normalizar_busqueda(titulo)
+                if "narnia" not in clave_titulo or rid in vistos_narnia:
+                    continue
+                vistos_narnia.add(rid)
+                botones_narnia.append([InlineKeyboardButton(
+                    f"🎬 Ver: {titulo_para_boton_pelicula(titulo)}"[:64],
+                    callback_data=f"seltemp_id_{rid}_General"
+                )])
+            if botones_narnia:
+                await update.message.reply_text(
+                    "🎬 He encontrado Narnia en el catálogo. Pulsa el botón para verla:",
+                    reply_markup=InlineKeyboardMarkup(botones_narnia)
+                )
+            else:
+                await update.message.reply_text(
+                    "No encuentro Narnia 1 en el catálogo. Si quieres, puedes solicitarla."
+                )
+        except Exception as error_narnia:
+            logger.error("Error buscando Narnia 1 en el catálogo: %s", error_narnia, exc_info=True)
+            await update.message.reply_text("⚠️ No pude consultar el catálogo ahora mismo. Inténtalo de nuevo.")
+        return
+
     user_key = f"ia_{update.effective_user.id}"
     estado = context.application.bot_data.setdefault("ia_uso_diario", {})
     hoy = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date().isoformat()
