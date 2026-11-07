@@ -3440,6 +3440,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "Si aparece una sola temporada, menciona solo esa. Si no aparecen episodios, no afirmes cuántos hay. Puedes recomendar títulos relacionados, pero separa películas y series según el catálogo. "
             "Si un título no aparece, dilo y ofrece registrar una petición; nunca afirmes que ya la registraste sin confirmación explícita. "
             "Para series, pregunta qué temporada desea solo si hay varias temporadas reales y no especifica una. "
+            "El catálogo solo confirma títulos y temporadas; no contiene fechas ni años de estreno. Nunca inventes ni adivines el año de una película o serie, aunque el usuario lo pregunte o el título parezca conocido. Si el año no está confirmado en los datos disponibles, di claramente que no tienes ese dato confirmado. No confundas el año de reestreno, producción o registro con el estreno original. " +
             "No afirmes tener internet en tiempo real. No solicites contraseñas, tokens ni datos sensibles. "
             "Responde en texto sencillo y limpio: no uses Markdown, asteriscos, negritas, encabezados, listas con símbolos ni bloques de código. Mantén las respuestas breves y naturales.\\n\\n"
             "CATÁLOGO ACTUAL COMPLETO (cada línea es un registro real de Turso; General significa sin temporada):\\n"
