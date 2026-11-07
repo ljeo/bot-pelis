@@ -3523,6 +3523,9 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             r"\b(?:de que trata|de que va|sinopsis|argumento|trama|sobre que trata|what is .* about|plot of|synopsis of)\b",
             pregunta_norm_sinopsis
         ))
+        if es_pregunta_sinopsis:
+            # Evita que el historial arrastre respuestas bilingües anteriores.
+            contenidos = [{"role": "user", "parts": [{"text": pregunta}]}]
         instruccion = (
             "Eres el asistente amable de bot-pelis. Responde en el idioma del usuario, "
             "principalmente español o inglés. Ayuda con conversación general y cine/series. "
@@ -3544,7 +3547,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             + "\n\nDATOS DE TMDB (fuente externa; usa estos datos solo si corresponden al título preguntado; si no hay coincidencia clara, indica que no pudiste identificarlo):\n"
             + (datos_tmdb if datos_tmdb else "No hay resultados de TMDb para esta consulta o no se consultó. No inventes fechas ni años.")
             + (
-                "\\n\\nINSTRUCCIÓN PRIORITARIA PARA ESTA PREGUNTA DE SINOPSIS: responde únicamente en español salvo que el usuario haya preguntado en inglés. Resume la trama en 3 a 5 frases, con un máximo aproximado de 70 palabras. No escribas introducciones largas, listas, análisis, recomendaciones ni datos adicionales. Habla exclusivamente de la película o serie preguntada. No menciones videojuegos, juegos, productos, adaptaciones u otros medios, ni contenido ajeno a su trama. Si los datos de TMDb incluyen resultados de varios títulos, utiliza solo el que coincida claramente con el título solicitado."
+                "\\n\\nINSTRUCCIÓN PRIORITARIA PARA ESTA PREGUNTA DE SINOPSIS: responde en un solo idioma: español si el usuario pregunta en español e inglés solo si pregunta en inglés. No incluyas dos versiones ni traducciones duplicadas. Si TMDb proporciona una sinopsis en inglés, traduce su contenido al español de forma natural; nunca la pegues en inglés. Resume la trama en 3 a 5 frases, con un máximo aproximado de 70 palabras. No escribas introducciones largas, listas, análisis, recomendaciones ni datos adicionales. Habla exclusivamente de la película o serie preguntada. No menciones videojuegos, juegos, productos, adaptaciones u otros medios, ni contenido ajeno a su trama. Si los datos de TMDb incluyen resultados de varios títulos, utiliza solo el que coincida claramente con el título solicitado."
                 if es_pregunta_sinopsis else ""
             )
         )
