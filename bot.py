@@ -3358,7 +3358,53 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         r"que tal|como estas|hola bot|hola bot pelis|buenas bot)",
         saludo
     ):
-        await update.message.reply_text("¡Hola! 👋 ¿Qué película o serie te gustaría ver?")
+        context.user_data["ia_esperando_busqueda_catalogo"] = True
+        await update.message.reply_text(
+            "¡Hola! 👋 ¿Qué película o serie buscas? Dime el nombre y revisaré si está en el catálogo."
+        )
+        return
+
+    # Si el usuario responde al saludo con un título, comprobarlo directamente en el catálogo.
+    if context.user_data.pop("ia_esperando_busqueda_catalogo", False):
+        titulo_buscado = pregunta.strip()
+        try:
+            resultado_busqueda = await ejecutar_turso_sql([
+                "SELECT id, temporada, titulo FROM peliculas ORDER BY id DESC"
+            ])
+            filas_busqueda = resultado_busqueda.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            clave_buscada = clave_serie_catalogo(titulo_buscado)
+            coincidencias = []
+            for fila in filas_busqueda:
+                rid = str(fila[0].get("value", "")) if len(fila) > 0 else ""
+                temp = str(fila[1].get("value", "General")) if len(fila) > 1 else "General"
+                nombre = str(fila[2].get("value", "")) if len(fila) > 2 else ""
+                nombre_base = extraer_nombre_base_serie(nombre) if temp != "General" else nombre
+                if rid and nombre and clave_buscada and (
+                    clave_serie_catalogo(nombre) == clave_buscada
+                    or clave_serie_catalogo(nombre_base) == clave_buscada
+                ):
+                    coincidencias.append((rid, temp, nombre))
+            if coincidencias:
+                botones = []
+                vistos_busqueda = set()
+                for rid, temp, nombre in coincidencias:
+                    clave = (rid, temp)
+                    if clave in vistos_busqueda:
+                        continue
+                    vistos_busqueda.add(clave)
+                    etiqueta = f"📺 Ver: {extraer_nombre_base_serie(nombre)} - {temp}" if temp != "General" else f"🎬 Ver: {nombre}"
+                    botones.append([InlineKeyboardButton(etiqueta[:64], callback_data=f"seltemp_id_{rid}_{temp}")])
+                await update.message.reply_text(
+                    f"¡Sí! «{titulo_buscado}» está en el catálogo. ¿La quieres? Pulsa el botón para abrirla:",
+                    reply_markup=InlineKeyboardMarkup(botones)
+                )
+            else:
+                await update.message.reply_text(
+                    f"No encuentro «{titulo_buscado}» en el catálogo. Prueba con otro título o dime si quieres solicitarlo."
+                )
+        except Exception as error_busqueda:
+            logger.error("Error buscando un título después del saludo: %s", error_busqueda, exc_info=True)
+            await update.message.reply_text("⚠️ No pude consultar el catálogo ahora mismo. Inténtalo de nuevo.")
         return
 
     # Flujo directo de petición: primero pide el título y después comprueba
