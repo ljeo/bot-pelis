@@ -3631,6 +3631,13 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except Exception as error_gemini:
                 logger.error("También falló Gemini: %s", error_gemini)
 
+        if not respuesta_texto and es_pregunta_sinopsis:
+            # Si ambos servicios de IA fallan, entregar directamente la sinopsis de TMDb.
+            coincidencia = re.search(r"; Sinopsis: ([^\\n]+)", datos_tmdb or "")
+            sinopsis_respaldo = coincidencia.group(1).strip() if coincidencia else ""
+            if sinopsis_respaldo and sinopsis_respaldo.lower() != "no disponible":
+                respuesta_texto = sinopsis_respaldo
+                proveedor_usado = "TMDb (respaldo)"
         if not respuesta_texto:
             await update.message.reply_text(
                 "⏳ Ahora mismo no he podido conectar con los servicios de IA. Inténtalo de nuevo más tarde."
