@@ -2870,6 +2870,30 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
 
+        # En series, exigir que el título solicitado aparezca como palabras completas
+        # y consecutivas. Así, buscar "It" no devuelve "Chespirito".
+        if patron_serie and rows:
+            def normalizar_serie_para_pedir(valor):
+                valor = normalizar_busqueda(str(valor or ""))
+                valor = re.sub(r"\\b(?:temporada|temp)\\s*\\d+\\b", " ", valor)
+                valor = re.sub(r"\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[sS]\\d{1,2}[eE]\\d{1,2}\\b", " ", valor)
+                valor = re.sub(r"[^a-z0-9]+", " ", valor)
+                return re.sub(r"\\s+", " ", valor).strip()
+
+            palabras_solicitadas = normalizar_serie_para_pedir(titulo_solicitado).split()
+            coincidentes = []
+            for fila in rows:
+                if len(fila) <= 2 or "value" not in fila[2]:
+                    continue
+                palabras_titulo = normalizar_serie_para_pedir(fila[2]["value"]).split()
+                longitud = len(palabras_solicitadas)
+                if longitud and any(
+                    palabras_titulo[i:i + longitud] == palabras_solicitadas
+                    for i in range(len(palabras_titulo) - longitud + 1)
+                ):
+                    coincidentes.append(fila)
+            rows = coincidentes
+
         # Ignora año, acentos y alias entre paréntesis; acepta variantes cercanas.
         if not patron_serie and rows:
             from difflib import SequenceMatcher
