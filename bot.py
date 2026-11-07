@@ -3086,7 +3086,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     context.user_data["ia_activa"] = True
-    pregunta = " ".join(context.args).strip() or context.user_data.pop("ia_pregunta_pendiente", "").strip()
+    pregunta = " ".join(context.args or []).strip() or context.user_data.pop("ia_pregunta_pendiente", "").strip()
     if not pregunta:
         await update.message.reply_text(
             "🤖 ¡Hola! Soy el asistente de bot-pelis.\n\n"
