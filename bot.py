@@ -2920,7 +2920,17 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     continue
                 ratio = SequenceMatcher(None, objetivo, normalizado).ratio()
                 cobertura = len(tokens_objetivo & tokens_fila) / max(1, min(len(tokens_objetivo), len(tokens_fila)))
-                if objetivo == normalizado or objetivo in normalizado or (ratio >= 0.68 and cobertura >= 0.65):
+                # Para búsquedas de una sola palabra, exigir una palabra completa:
+                # "It" no debe coincidir con fragmentos como "Infinity".
+                if len(tokens_objetivo) == 1:
+                    coincide = objetivo in tokens_fila
+                else:
+                    coincide = (
+                        objetivo == normalizado
+                        or objetivo in normalizado
+                        or (ratio >= 0.68 and cobertura >= 0.65)
+                    )
+                if coincide:
                     coincidentes.append(fila)
             rows = coincidentes
 
