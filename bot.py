@@ -3637,6 +3637,18 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
             return
         logger.info("Respuesta de IA generada mediante %s.", proveedor_usado or "proveedor disponible")
+        # Nunca mostrar al usuario análisis interno o metadatos de planificación del modelo.
+        if re.search(
+            r"(?is)^\\s*(?:analyze the request|analysis of the request|request analysis|"
+            r"analiza la solicitud|análisis de la solicitud|user\\s*:|language\\s*:|"
+            r"task\\s*:|data source\\s*:)",
+            respuesta_texto
+        ):
+            logger.warning("Se descartó una respuesta de IA con formato de análisis interno.")
+            await update.message.reply_text(
+                "⚠️ No he podido preparar la sinopsis correctamente. ¿Puedes intentarlo de nuevo?"
+            )
+            return
         # Limpia Markdown incluso si el modelo ignora la instrucción de texto sencillo.
         respuesta_texto = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", respuesta_texto)
         respuesta_texto = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", respuesta_texto)
