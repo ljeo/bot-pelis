@@ -3094,6 +3094,109 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error en comando /pedir: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu petición.")
 
+
+def extraer_candidato_peticion_ia(pregunta: str, respuesta: str = ""):
+    respuesta_norm = normalizar_busqueda(respuesta or "")
+    invitacion = "peticion" in respuesta_norm and any(x in respuesta_norm for x in ("quieres", "gustas", "puedo", "deseas"))
+    intencion = bool(re.search(r"\b(?:pedir|solicitar|agregar|añadir|anadir|añadan|anadan|agreguen|peticion)\b", pregunta, re.IGNORECASE))
+    if not invitacion and not intencion:
+        return None
+    texto = re.sub(r"[¿?¡!]", " ", (pregunta or "")).strip()
+    texto = re.sub(r"^(?:oye\s+)?(?:puedes|podrias|podrías|quiero|quisiera|me gustaria|me gustaría|me puedes|me podrias|me podrías|tienes|hay|esta|está|busco|quiero ver|donde puedo ver|dónde puedo ver)\s+", "", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"^(?:(?:hacer|registrar)\s+una\s+peticion\s+de|peticion\s+de|solicitar|pedir|agregar|añadir|anadir|que\s+(?:agreguen|añadan|anadan)\s+|que\s+me\s+agreguen\s+)", "", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"^(?:la\s+)?(?:pelicula|película|serie|series|anime)\s+(?:llamada\s+)?", "", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"\s+(?:al\s+catalogo|al\s+catálogo|en\s+el\s+catalogo|en\s+el\s+catálogo|por\s+favor|porfa)$", "", texto, flags=re.IGNORECASE).strip(" .,:;-'""")
+    marcador = re.search(r"\b(?:temporada|temp)\s*(\d+)\b|\b(\d{1,2})[xX]\d{1,2}\b|\b[Ss](\d{1,2})[Ee]\d{1,2}\b", texto, re.IGNORECASE)
+    numero = next((x for x in marcador.groups() if x), None) if marcador else None
+    if marcador:
+        texto = (texto[:marcador.start()] + " " + texto[marcador.end():]).strip()
+    es_serie = numero is not None or bool(re.search(r"\b(?:serie|series|anime|temporada|temporadas)\b", pregunta, re.IGNORECASE))
+    texto = re.sub(r"\b(?:pelicula|película|serie|series|anime)\b", " ", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"\s+", " ", texto).strip(" .,:;-'""")
+    if es_serie and numero is None:
+        return {"titulo": texto, "temporada": None, "falta_temporada": True} if texto else None
+    if not texto:
+        return None
+    temporada = f"Temporada {int(numero)}" if numero else "General"
+    anio = re.search(r"\b(?:19|20)\d{2}\b$", texto)
+    if anio and temporada == "General":
+        texto = texto[:anio.start()].strip()
+    return {"titulo": texto, "temporada": temporada, "falta_temporada": False}
+
+
+async def registrar_peticion_desde_ia(update: Update, context: ContextTypes.DEFAULT_TYPE, peticion: dict, mensaje_origen=None) -> None:
+    user, chat = update.effective_user, update.effective_chat
+    if not user or not chat:
+        return
+    titulo = str(peticion.get("titulo", "")).strip()
+    temporada = str(peticion.get("temporada") or "General")
+    if not titulo:
+        return
+    titulo_sql, temporada_sql = titulo.replace("'", "''"), temporada.replace("'", "''")
+    chat_sql, user_sql = str(chat.id), str(user.id)
+    await ejecutar_turso_sql([
+        "INSERT INTO solicitudes (chat_id, user_id, titulo, temporada) "
+        f"VALUES ('{chat_sql}', '{user_sql}', '{titulo_sql}', '{temporada_sql}')"
+    ])
+    admin_mensaje_id = None
+    try:
+        user_info = f"@{user.username}" if user.username else f"{user.first_name} (ID: {user.id})"
+        admin_texto = (
+            "📩 **¡NUEVA PETICIÓN RECIBIDA DESDE GEMINI!**\n\n"
+            f"👤 **Usuario:** {user_info}\n🎬 **Contenido solicitado:** {titulo}\n"
+            f"📂 **Temporada:** {temporada}\n💬 **Chat de origen:** {chat.id}"
+        )
+        aviso_admin = await context.bot.send_message(chat_id=SUPER_ADMIN_ID, text=admin_texto, parse_mode="Markdown")
+        admin_mensaje_id = aviso_admin.message_id
+    except Exception as error_admin:
+        logger.error("No se pudo notificar al administrador por petición IA: %s", error_admin)
+    texto_usuario = (
+        f"⏳ **¡Petición registrada!**\n\n🎬 Contenido: *{titulo}*\n"
+        f"📂 Temporada: *{temporada}*\n\n"
+        "He enviado tu solicitud al administrador. Te avisaré cuando se agregue al catálogo."
+    )
+    if mensaje_origen is not None:
+        mensaje_usuario = await mensaje_origen.reply_text(texto_usuario, parse_mode="Markdown")
+    else:
+        mensaje_usuario = await context.bot.send_message(chat_id=chat.id, text=texto_usuario, parse_mode="Markdown")
+    try:
+        res = await ejecutar_turso_sql([
+            "SELECT id FROM solicitudes "
+            f"WHERE chat_id = '{chat_sql}' AND user_id = '{user_sql}' "
+            f"AND titulo = '{titulo_sql}' AND temporada = '{temporada_sql}' ORDER BY id DESC LIMIT 1"
+        ])
+        filas = res.get("results", [])[0]["response"]["result"].get("rows", [])
+        if filas:
+            sid = int(filas[0][0]["value"])
+            admin_id_sql = str(int(admin_mensaje_id)) if admin_mensaje_id is not None else "NULL"
+            await ejecutar_turso_sql([
+                "UPDATE solicitudes SET "
+                f"mensaje_id = {mensaje_usuario.message_id}, admin_mensaje_id = {admin_id_sql} WHERE id = {sid}"
+            ])
+    except Exception as error_ids:
+        logger.error("No se pudieron guardar los IDs de avisos de petición IA: %s", error_ids, exc_info=True)
+
+
+async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    peticion = context.user_data.get("ia_peticion_pendiente")
+    if not peticion or str(peticion.get("chat_id")) != str(query.message.chat_id):
+        await editar_o_enviar(query, "⚠️ Esta confirmación ya no está disponible. Vuelve a pedirle a Gemini que registre la solicitud.")
+        return
+    if query.data == "ia_req_no":
+        context.user_data.pop("ia_peticion_pendiente", None)
+        await editar_o_enviar(query, "De acuerdo, no he registrado ninguna petición.")
+        return
+    context.user_data.pop("ia_peticion_pendiente", None)
+    try:
+        await editar_o_enviar(query, "⏳ Registrando tu petición...")
+        await registrar_peticion_desde_ia(update, context, peticion)
+    except Exception as error:
+        logger.error("Error registrando petición confirmada por Gemini: %s", error, exc_info=True)
+        await context.bot.send_message(chat_id=query.message.chat_id, text="❌ No pude registrar la petición. Inténtalo de nuevo o utiliza /pedir.")
+
+
 async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Asistente conversacional opcional; no modifica datos ni comandos existentes."""
     if not update.message or not update.effective_user:
@@ -3118,6 +3221,31 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if len(pregunta) > 1000:
         await update.message.reply_text("⚠️ La pregunta es demasiado larga. Usa un máximo de 1000 caracteres.")
         return
+
+    falta_temp = context.user_data.get("ia_peticion_falta_temporada")
+    if falta_temp:
+        mtemp = re.search(r"\b(?:temporada|temp)\s*(\d+)\b|\b(\d{1,2})[xX]\d{1,2}\b|\b[Ss](\d{1,2})[Ee]\d{1,2}\b", pregunta, re.IGNORECASE)
+        if mtemp:
+            numero = next(x for x in mtemp.groups() if x)
+            context.user_data.pop("ia_peticion_falta_temporada", None)
+            context.user_data["ia_peticion_pendiente"] = {"titulo": falta_temp, "temporada": f"Temporada {int(numero)}", "chat_id": update.effective_chat.id}
+            teclado = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Sí, registrar petición", callback_data="ia_req_yes"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="ia_req_no")
+            ]])
+            await update.message.reply_text(f"📩 ¿Confirmas que registre *{falta_temp} - Temporada {int(numero)}*?", reply_markup=teclado, parse_mode="Markdown")
+            return
+    pendiente = context.user_data.get("ia_peticion_pendiente")
+    if pendiente and re.fullmatch(r"\s*(?:si|sí|claro|vale|acepto|haz(?:lo)?|registrala|regístrala|adelante|de acuerdo)[.! ]*\s*", pregunta, re.IGNORECASE):
+        if str(pendiente.get("chat_id")) == str(update.effective_chat.id):
+            context.user_data.pop("ia_peticion_pendiente", None)
+            try:
+                await registrar_peticion_desde_ia(update, context, pendiente, mensaje_origen=update.message)
+            except Exception as error:
+                logger.error("Error registrando petición aceptada en texto: %s", error, exc_info=True)
+                await update.message.reply_text("❌ No pude registrar la petición. Inténtalo de nuevo o utiliza /pedir.")
+            return
+        context.user_data.pop("ia_peticion_pendiente", None)
 
     user_key = f"ia_{update.effective_user.id}"
     estado = context.application.bot_data.setdefault("ia_uso_diario", {})
@@ -3165,7 +3293,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "principalmente español o inglés. Ayuda con conversación general y cine/series. "
             "Recomienda títulos con una breve explicación. No inventes que un contenido está "
             "disponible en el bot: usa exclusivamente el catálogo adjunto para confirmar disponibilidad. "
-            "Si no aparece en el catálogo, dilo claramente. No afirmes tener acceso a internet en tiempo real. "
+            "Si no aparece en el catálogo, dilo claramente y ofrece registrar una petición; nunca afirmes que ya la registraste sin confirmación explícita. "
+            "Para series y anime, pregunta qué temporada desea si no la especifica. No afirmes tener acceso a internet en tiempo real. "
             "No solicites contraseñas, tokens ni datos sensibles. Mantén las respuestas concisas.\n\n"
             "CATÁLOGO ACTUAL (muestra de hasta 60 registros recientes; puede no ser completo):\n"
             + ("\n".join(catalogo) if catalogo else "No se pudo obtener el catálogo.")
@@ -3239,6 +3368,20 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 InlineKeyboardButton(etiqueta[:64], callback_data=f"seltemp_id_{id_registro}_{temporada}")
             ])
 
+        candidato = extraer_candidato_peticion_ia(pregunta, respuesta_texto)
+        if candidato:
+            if candidato.get("falta_temporada"):
+                context.user_data["ia_peticion_falta_temporada"] = candidato["titulo"]
+                respuesta_texto += f"\n\n📺 Para registrar *{candidato['titulo']}*, ¿qué temporada quieres pedir?"
+            else:
+                context.user_data["ia_peticion_pendiente"] = {
+                    "titulo": candidato["titulo"], "temporada": candidato["temporada"],
+                    "chat_id": update.effective_chat.id
+                }
+                keyboard_ia.append([
+                    InlineKeyboardButton("✅ Sí, registrar petición", callback_data="ia_req_yes"),
+                    InlineKeyboardButton("❌ Cancelar", callback_data="ia_req_no")
+                ])
         await update.message.reply_text(
             respuesta_texto[:3500],
             reply_markup=InlineKeyboardMarkup(keyboard_ia) if keyboard_ia else None
@@ -3313,6 +3456,7 @@ def main() -> None:
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
     application.add_handler(CommandHandler("buscar", buscar_pelicula))
     application.add_handler(CommandHandler("pedir", pedir_contenido))
+    application.add_handler(CallbackQueryHandler(callback_peticion_ia, pattern="^ia_req_(yes|no)$"))
     application.add_handler(CommandHandler("eliminar", menu_eliminar_contenido))
     application.add_handler(CommandHandler("addadmin", agregar_admin))
     application.add_handler(CommandHandler("deladmin", quitar_admin))
