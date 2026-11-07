@@ -3355,7 +3355,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # el catálogo real antes de ofrecer registrar la solicitud.
     pregunta_peticion = normalizar_busqueda(pregunta)
     solicitud_sin_titulo = bool(re.fullmatch(
-        r"(?:pedir|quiero pedir|quisiera pedir|solicitar|quiero solicitar|"
+        r"(?:pedir|quiero pedir|quisiera pedir|puedo pedir|podria pedir|se puede pedir|"
+        r"solicitar|quiero solicitar|puedo solicitar|podria solicitar|"
         r"quiero hacer una peticion|quisiera hacer una peticion|me gustaria hacer una peticion)",
         pregunta_peticion
     ))
