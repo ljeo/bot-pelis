@@ -3774,12 +3774,15 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             palabras_ruido = {
                 "quiero", "dame", "envia", "mandame", "pasame", "ver", "busco",
                 "buscar", "ponme", "muestrame", "mostrar", "descargar", "pelicula",
-                "peliculas", "serie", "series", "anime", "animes", "la", "el", "los",
-                "las", "de", "del", "con", "por", "favor", "ano", "del", "una", "un"
+                "peliculas", "serie", "series", "anime", "animes", "saga", "sagas",
+                "coleccion", "completa", "la", "el", "los", "las", "de", "del",
+                "con", "por", "favor", "ano", "una", "un"
             }
             terminos_pedidos = [
                 t for t in consulta
-                if t not in palabras_ruido and not re.fullmatch(r"(?:19|20)\d{2}", t)
+                if t not in palabras_ruido
+                and not re.fullmatch(r"(?:19|20)\d{2}", t)
+                and not re.fullmatch(r"\d{1,2}", t)
             ]
             tokens_nombre = [t for t in tokens if not re.fullmatch(r"(?:19|20)\d{2}", t)]
             if not terminos_pedidos or not all(t in tokens_nombre for t in terminos_pedidos):
