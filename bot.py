@@ -3224,6 +3224,34 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⚠️ La pregunta es demasiado larga. Usa un máximo de 1000 caracteres.")
         return
 
+    # Las peticiones explícitas de catálogo se resuelven con el catálogo real
+    # del bot, sin dejar que el modelo convierta la intención en una recomendación.
+    pregunta_catalogo = normalizar_busqueda(pregunta)
+    pide_catalogo = bool(re.search(
+        r"\\b(?:catalogo|lista)\\b|\\bque (?:peliculas|series|animes) (?:tienes|hay|estan disponibles)\\b",
+        pregunta_catalogo
+    ))
+    if pide_catalogo:
+        pide_peliculas = bool(re.search(r"\\b(?:pelicula|peliculas|cine|films?)\\b", pregunta_catalogo))
+        pide_series = bool(re.search(r"\\b(?:serie|series|anime|animes)\\b", pregunta_catalogo))
+        if pide_peliculas and not pide_series:
+            teclado_catalogo = [[InlineKeyboardButton("🎬 Ver catálogo de películas", callback_data="cat_peliculas")]]
+            texto_catalogo = "🎬 Aquí tienes el catálogo de películas disponibles. Pulsa para abrirlo:"
+        elif pide_series and not pide_peliculas:
+            teclado_catalogo = [[InlineKeyboardButton("📺 Ver catálogo de series y animes", callback_data="cat_series")]]
+            texto_catalogo = "📺 Aquí tienes el catálogo de series y animes. Pulsa para abrirlo:"
+        else:
+            teclado_catalogo = [
+                [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas")],
+                [InlineKeyboardButton("📺 Series y animes", callback_data="cat_series")]
+            ]
+            texto_catalogo = "📚 ¿Qué catálogo quieres consultar?"
+        await update.message.reply_text(
+            texto_catalogo,
+            reply_markup=InlineKeyboardMarkup(teclado_catalogo)
+        )
+        return
+
     falta_temp = context.user_data.get("ia_peticion_falta_temporada")
     if falta_temp:
         mtemp = re.search(r"\b(?:temporada|temp)\s*(\d+)\b|\b(\d{1,2})[xX]\d{1,2}\b|\b[Ss](\d{1,2})[Ee]\d{1,2}\b", pregunta, re.IGNORECASE)
