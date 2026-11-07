@@ -3228,12 +3228,12 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # del bot, sin dejar que el modelo convierta la intención en una recomendación.
     pregunta_catalogo = normalizar_busqueda(pregunta)
     pide_catalogo = bool(re.search(
-        r"\\b(?:catalogo|lista)\\b|\\bque (?:peliculas|series|animes) (?:tienes|hay|estan disponibles)\\b",
+        r"\b(?:catalogo|lista)\b|\bque (?:peliculas|series|animes) (?:tienes|hay|estan disponibles)\b",
         pregunta_catalogo
     ))
     if pide_catalogo:
-        pide_peliculas = bool(re.search(r"\\b(?:pelicula|peliculas|cine|films?)\\b", pregunta_catalogo))
-        pide_series = bool(re.search(r"\\b(?:serie|series|anime|animes)\\b", pregunta_catalogo))
+        pide_peliculas = bool(re.search(r"\b(?:pelicula|peliculas|cine|films?)\b", pregunta_catalogo))
+        pide_series = bool(re.search(r"\b(?:serie|series|anime|animes)\b", pregunta_catalogo))
         if pide_peliculas and not pide_series:
             teclado_catalogo = [[InlineKeyboardButton("🎬 Ver catálogo de películas", callback_data="cat_peliculas")]]
             texto_catalogo = "🎬 Aquí tienes el catálogo de películas disponibles. Pulsa para abrirlo:"
