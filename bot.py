@@ -3222,6 +3222,21 @@ async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYP
     confirmaciones = context.application.bot_data.setdefault("ia_peticion_confirmaciones", {})
     clave_confirmacion = f"{query.message.chat_id}:{query.message.message_id}"
     peticion = confirmaciones.get(clave_confirmacion)
+    # Recuperar el título del propio mensaje si la memoria temporal se perdió
+    # (por ejemplo, tras un reinicio de Render) y el usuario pulsa un botón antiguo.
+    if not peticion and query.message and query.message.text:
+        recuperada = re.search(
+            r"No encuentro\s+«(.+?)»\s+en el catálogo",
+            query.message.text,
+            re.IGNORECASE | re.DOTALL
+        )
+        if recuperada:
+            peticion = {
+                "titulo": recuperada.group(1).strip(),
+                "temporada": "General",
+                "chat_id": query.message.chat_id,
+                "user_id": update.effective_user.id
+            }
     if (
         not peticion
         or str(peticion.get("chat_id")) != str(query.message.chat_id)
