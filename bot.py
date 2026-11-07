@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 SUPER_ADMIN_ID = 6709726108  
 
@@ -2312,6 +2314,118 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error en comando /pedir: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu petición.")
 
+async def activar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.effective_user:
+        return
+    if not GEMINI_API_KEY:
+        await update.message.reply_text(
+            "⚠️ La IA todavía no está configurada. El administrador debe revisar GEMINI_API_KEY en Render."
+        )
+        return
+    context.user_data["gemini_activa"] = True
+    context.user_data["gemini_historial"] = []
+    await update.message.reply_text(
+        "🤖 **Gemini está activada para ti.**\n\n"
+        "Ya puedes escribirme normalmente y te responderé con IA. "
+        "Para terminar la sesión, usa /apagar.",
+        parse_mode="Markdown"
+    )
+
+
+async def apagar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    context.user_data["gemini_activa"] = False
+    context.user_data.pop("gemini_historial", None)
+    await update.message.reply_text("🛑 Gemini se ha apagado. El bot vuelve a su funcionamiento normal.")
+
+
+async def responder_con_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.effective_user:
+        return
+    if not context.user_data.get("gemini_activa"):
+        return
+    # No interferir con el panel de configuración de bienvenida del administrador.
+    if context.user_data.get("esperando_foto_bienvenida") or context.user_data.get("esperando_texto_bienvenida"):
+        return
+
+    texto = (update.message.text or "").strip()
+    if not texto:
+        return
+    if not GEMINI_API_KEY:
+        await update.message.reply_text("⚠️ Falta configurar GEMINI_API_KEY en Render.")
+        return
+
+    historial = context.user_data.setdefault("gemini_historial", [])
+    historial.append({"role": "user", "parts": [{"text": texto}]})
+    # Mantener un contexto corto para controlar consumo y evitar crecer indefinidamente.
+    historial[:] = historial[-12:]
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    payload = {
+        "systemInstruction": {
+            "parts": [{
+                "text": "Eres el asistente amable y útil de un bot de películas, series y anime. "
+                        "Responde en español salvo que el usuario escriba en otro idioma. "
+                        "Sé claro, respetuoso y conciso."
+            }]
+        },
+        "contents": historial,
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 700}
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "x-goog-api-key": GEMINI_API_KEY,
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
+
+        if response.status_code == 429:
+            # Quitar el mensaje que no pudo procesarse para que el historial no se desincronice.
+            historial.pop()
+            await update.message.reply_text(
+                "⏳ Se alcanzó temporalmente el límite gratuito de Gemini. "
+                "Espera un poco e inténtalo de nuevo; no se activará ningún plan de pago."
+            )
+            return
+        if response.status_code in (401, 403):
+            historial.pop()
+            logger.error("Gemini rechazó la API key: HTTP %s", response.status_code)
+            await update.message.reply_text("⚠️ Gemini no aceptó la API Key. Revisa el secreto GEMINI_API_KEY en Render.")
+            return
+        response.raise_for_status()
+        data = response.json()
+        candidatos = data.get("candidates", [])
+        partes = candidatos[0].get("content", {}).get("parts", []) if candidatos else []
+        respuesta = "\n".join(
+            parte.get("text", "") for parte in partes if parte.get("text")
+        ).strip()
+        if not respuesta:
+            historial.pop()
+            await update.message.reply_text("⚠️ Gemini no pudo generar una respuesta para ese mensaje. Prueba con otra pregunta.")
+            return
+
+        historial.append({"role": "model", "parts": [{"text": respuesta}]})
+        historial[:] = historial[-12:]
+        # Telegram limita los mensajes de texto a 4096 caracteres.
+        for inicio in range(0, len(respuesta), 4000):
+            await update.message.reply_text(respuesta[inicio:inicio + 4000])
+    except httpx.HTTPStatusError as e:
+        if historial and historial[-1].get("role") == "user":
+            historial.pop()
+        logger.error("Error HTTP de Gemini: %s - %s", e.response.status_code, e.response.text[:1000])
+        await update.message.reply_text("❌ Gemini tuvo un problema al responder. Inténtalo de nuevo más tarde.")
+    except Exception as e:
+        if historial and historial[-1].get("role") == "user":
+            historial.pop()
+        logger.error("Error consultando Gemini: %s", e, exc_info=True)
+        await update.message.reply_text("❌ No pude conectar con Gemini en este momento. Inténtalo de nuevo.")
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Excepción global capturada:", exc_info=context.error)
 
@@ -2320,6 +2434,8 @@ async def post_init(application) -> None:
     comandos = [
         BotCommand("start", "Inicia el bot / Menú principal"),
         BotCommand("buscar", "Busca películas, series o animes"),
+        BotCommand("ia", "Activa el chat con Gemini"),
+        BotCommand("apagar", "Apaga el chat con Gemini"),
         BotCommand("pedir", "Solicita o verifica una película o serie"),
         BotCommand("guardar", "Guarda un video (responde a un archivo)"),
         BotCommand("eliminar", "Elimina una película o serie de la BD"),
@@ -2349,6 +2465,8 @@ def main() -> None:
     application.add_handler(CommandHandler("idioma", configurar_idioma))
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
     application.add_handler(CommandHandler("buscar", buscar_pelicula))
+    application.add_handler(CommandHandler("ia", activar_ia))
+    application.add_handler(CommandHandler("apagar", apagar_ia))
     application.add_handler(CommandHandler("pedir", pedir_contenido))
     application.add_handler(CommandHandler("eliminar", menu_eliminar_contenido))
     application.add_handler(CommandHandler("addadmin", agregar_admin))
@@ -2359,6 +2477,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(callback_menu_bienvenida, pattern="^cfg_"))
     application.add_handler(CallbackQueryHandler(settings_callback, pattern="^set_"))
     application.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, manejar_captura_config))
+    # Grupo separado: permite que Gemini procese texto sin bloquear los handlers existentes.
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder_con_gemini), group=1)
 
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.VIDEO, guardar_desde_canal))
 
