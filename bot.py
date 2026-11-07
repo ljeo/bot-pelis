@@ -3520,7 +3520,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         contenidos.append({"role": "user", "parts": [{"text": pregunta}]})
         pregunta_norm_sinopsis = normalizar_busqueda(pregunta)
         es_pregunta_sinopsis = bool(re.search(
-            r"\\b(?:de que trata|de que va|sinopsis|argumento|trama|sobre que trata|what is .* about|plot of|synopsis of)\\b",
+            r"\b(?:de que trata|de que va|sinopsis|argumento|trama|sobre que trata|what is .* about|plot of|synopsis of)\b",
             pregunta_norm_sinopsis
         ))
         instruccion = (
