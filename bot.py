@@ -3242,19 +3242,24 @@ async def buscar_datos_tmdb(pregunta: str) -> str:
         return ""
 
     pregunta_norm = normalizar_busqueda(pregunta)
-    consulta_datos = bool(re.search(
+    consulta_fecha = bool(re.search(
         r"\b(?:ano|fecha|estreno|estren[oó]|lanzamiento|cuando salio|cuando se estreno|release date|release year|when did|premiere|fecha de lanzamiento)\b",
         pregunta_norm
     ))
-    if not consulta_datos:
+    consulta_sinopsis = bool(re.search(
+        r"\b(?:de que trata|de que va|sinopsis|argumento|trama|sobre que trata|what is .* about|plot of|synopsis of)\b",
+        pregunta_norm
+    ))
+    # TMDb también aporta sinopsis; no limitar la consulta a preguntas de fechas.
+    if not consulta_fecha and not consulta_sinopsis:
         return ""
 
     consulta = pregunta
     patrones = [
-        r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada)\s+",
-        r"^(?:what year was|when was|release date of|release year of)\s+",
-        r"\s+(?:se estreno|salio|fue estrenada|fue lanzada)\??$",
-        r"\s+(?:en que ano|que ano|fecha de estreno|release date|release year)\??$"
+        r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada|de que trata|de que va|sinopsis de|argumento de|trama de|sobre que trata)\\s+",
+        r"^(?:what year was|when was|release date of|release year of|what is .* about|plot of|synopsis of)\\s+",
+        r"\\s+(?:se estreno|salio|fue estrenada|fue lanzada|de que trata|de que va)\\??$",
+        r"\\s+(?:en que ano|que ano|fecha de estreno|release date|release year|sinopsis|argumento)\\??$"
     ]
     for patron in patrones:
         consulta = re.sub(patron, "", consulta, flags=re.IGNORECASE).strip()
@@ -3498,10 +3503,14 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "Eres el asistente amable de bot-pelis. Responde en el idioma del usuario, "
             "principalmente español o inglés. Ayuda con conversación general y cine/series. "
             "Recomienda títulos relacionados cuando sea útil, distinguiendo películas y series según los registros del catálogo. "
+            "SEPARA SIEMPRE conocimiento y disponibilidad: puedes explicar de qué trata una película o serie usando tu conocimiento general y los datos de TMDb, aunque no esté en el catálogo. Nunca respondas que no sabes la sinopsis solo porque el título no aparece en el catálogo. "
+            "El catálogo adjunto sirve únicamente para confirmar qué contenido está disponible en este bot y qué temporadas están guardadas; no limita tu conocimiento sobre películas y series. "
+            "Si preguntan por la trama o sinopsis, responde directamente con una explicación breve y clara; usa la sinopsis de TMDb si hay una coincidencia clara y, si no, tu conocimiento general sin inventar detalles. "
             "No inventes disponibilidad: usa exclusivamente el catálogo adjunto. Cada registro General es contenido sin temporada (normalmente una película), nunca una temporada. "
             "Las temporadas válidas son únicamente las que aparecen explícitamente en los registros. No inventes temporadas, números ni episodios, ni deduzcas temporadas posteriores. "
             "Si aparece una sola temporada, menciona solo esa. Si no aparecen episodios, no afirmes cuántos hay. Puedes recomendar títulos relacionados, pero separa películas y series según el catálogo. "
-            "Si un título no aparece, dilo y ofrece registrar una petición; nunca afirmes que ya la registraste sin confirmación explícita. "
+            "Cuando pregunten si una película o serie está disponible, comprueba el catálogo. Si no aparece, dilo y ofrece registrar una petición; esto no impide responder preguntas sobre su argumento, reparto o información general. Nunca afirmes que ya registraste una petición sin confirmación explícita. "
+            "Si el nombre coincide claramente con un título del catálogo, trátalo como ese título y no propongas opciones distintas solo por compartir alguna palabra. Por ejemplo, El hombre araña 2 no es lo mismo que Spider-Man (2002); no los presentes como alternativas equivalentes. Solo pide aclaración cuando haya dos o más coincidencias realmente plausibles. "
             "Para series, pregunta qué temporada desea solo si hay varias temporadas reales y no especifica una. "
             "El catálogo solo confirma títulos y temporadas; no contiene fechas ni años de estreno. Nunca inventes ni adivines el año de una película o serie, aunque el usuario lo pregunte o el título parezca conocido. Si el año no está confirmado en los datos disponibles, di claramente que no tienes ese dato confirmado. No confundas el año de reestreno, producción o registro con el estreno original. " +
             "No afirmes tener internet en tiempo real. No solicites contraseñas, tokens ni datos sensibles. "
