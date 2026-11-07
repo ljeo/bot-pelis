@@ -2457,16 +2457,37 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Comparar palabras completas y consecutivas, no subcadenas:
         # buscar "it" no debe encontrar "Captain" ni "Chespirito".
         palabras_consulta = re.findall(r"[a-z0-9]+", query_normalizada)
+        # Si la búsqueda incluye un año, se valida por separado del nombre:
+        # así funcionan tanto "/buscar capitan" como "/buscar capitan america 2011".
+        anios_consulta = [
+            palabra for palabra in palabras_consulta
+            if re.fullmatch(r"(?:19|20)\\d{2}", palabra)
+        ]
+        palabras_titulo_consulta = [
+            palabra for palabra in palabras_consulta
+            if palabra not in anios_consulta
+        ]
+
         def coincide_titulo_busqueda(titulo):
             palabras_titulo = re.findall(
                 r"[a-z0-9]+",
                 normalizar_busqueda(str(titulo or ""))
             )
-            longitud = len(palabras_consulta)
-            return bool(longitud) and any(
-                palabras_titulo[i:i + longitud] == palabras_consulta
-                for i in range(len(palabras_titulo) - longitud + 1)
+            anios_titulo = [
+                palabra for palabra in palabras_titulo
+                if re.fullmatch(r"(?:19|20)\\d{2}", palabra)
+            ]
+            palabras_nombre_titulo = [
+                palabra for palabra in palabras_titulo
+                if palabra not in anios_titulo
+            ]
+            longitud = len(palabras_titulo_consulta)
+            coincide_nombre = bool(longitud) and any(
+                palabras_nombre_titulo[i:i + longitud] == palabras_titulo_consulta
+                for i in range(len(palabras_nombre_titulo) - longitud + 1)
             )
+            coincide_anio = all(anio in anios_titulo for anio in anios_consulta)
+            return coincide_nombre and coincide_anio
 
         rows = [
             row for row in rows
