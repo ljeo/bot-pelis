@@ -3303,7 +3303,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     continue
                 registros_catalogo.append((id_registro, temporada, titulo))
                 clave = (titulo.casefold(), temporada.casefold())
-                if clave not in vistos and len(catalogo) < 60:
+                if clave not in vistos:
                     vistos.add(clave)
                     catalogo.append(f"- {titulo} ({temporada})")
         except Exception as error_catalogo:
@@ -3316,12 +3316,15 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         instruccion = (
             "Eres el asistente amable de bot-pelis. Responde en el idioma del usuario, "
             "principalmente español o inglés. Ayuda con conversación general y cine/series. "
-            "Recomienda títulos con una breve explicación. No inventes que un contenido está "
-            "disponible en el bot: usa exclusivamente el catálogo adjunto para confirmar disponibilidad. "
-            "Si no aparece en el catálogo, dilo claramente y ofrece registrar una petición; nunca afirmes que ya la registraste sin confirmación explícita. "
-            "Para series y anime, pregunta qué temporada desea si no la especifica. No afirmes tener acceso a internet en tiempo real. "
-            "No solicites contraseñas, tokens ni datos sensibles. Mantén las respuestas concisas.\n\n"
-            "CATÁLOGO ACTUAL (muestra de hasta 60 registros recientes; puede no ser completo):\n"
+            "Recomienda títulos relacionados cuando sea útil, distinguiendo películas y series según los registros del catálogo. "
+            "No inventes disponibilidad: usa exclusivamente el catálogo adjunto. Cada registro General es contenido sin temporada (normalmente una película), nunca una temporada. "
+            "Las temporadas válidas son únicamente las que aparecen explícitamente en los registros. No inventes temporadas, números ni episodios, ni deduzcas temporadas posteriores. "
+            "Si aparece una sola temporada, menciona solo esa. Si no aparecen episodios, no afirmes cuántos hay. Puedes recomendar títulos relacionados, pero separa películas y series según el catálogo. "
+            "Si un título no aparece, dilo y ofrece registrar una petición; nunca afirmes que ya la registraste sin confirmación explícita. "
+            "Para series, pregunta qué temporada desea solo si hay varias temporadas reales y no especifica una. "
+            "No afirmes tener internet en tiempo real. No solicites contraseñas, tokens ni datos sensibles. "
+            "Responde en texto sencillo y limpio: no uses Markdown, asteriscos, negritas, encabezados, listas con símbolos ni bloques de código. Mantén las respuestas breves y naturales.\\n\\n"
+            "CATÁLOGO ACTUAL COMPLETO (cada línea es un registro real de Turso; General significa sin temporada):\\n"
             + ("\n".join(catalogo) if catalogo else "No se pudo obtener el catálogo.")
         )
         respuesta_texto = ""
@@ -3410,6 +3413,13 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             )
             return
         logger.info("Respuesta de IA generada mediante %s.", proveedor_usado or "proveedor disponible")
+        # Limpia Markdown incluso si el modelo ignora la instrucción de texto sencillo.
+        respuesta_texto = re.sub(r"\\[([^\\]]+)\\]\\([^)]+\\)", r"\\1", respuesta_texto)
+        respuesta_texto = re.sub(r"(?m)^\\s{0,3}#{1,6}\\s*", "", respuesta_texto)
+        respuesta_texto = re.sub(r"\\*\\*|__|~~|\\x60{1,3}", "", respuesta_texto)
+        respuesta_texto = re.sub(r"(?m)^\\s*[-*•]\\s+", "", respuesta_texto)
+        respuesta_texto = re.sub(r"(?m)^\\s*\\d+[.)]\\s+", "", respuesta_texto)
+        respuesta_texto = re.sub(r"\\n{3,}", "\\n\\n", respuesta_texto).strip()
         if not respuesta_texto:
             await update.message.reply_text("⚠️ La IA no pudo generar una respuesta. Prueba con otra pregunta.")
             return
