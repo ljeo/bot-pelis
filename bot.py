@@ -2008,7 +2008,7 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"🎉 ¡Tu contenido <b>{escape(titulo_solicitado)}</b> ya ha sido agregado al catálogo!\n\nAbre el catálogo actualizado para encontrarlo.",
+                text=f"🎉 ¡Tu petición ha sido agregada al catálogo!\n\n📺 Contenido: <b>{escape(titulo_solicitado)}</b>\n\nAbre el catálogo actualizado para encontrarlo.",
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
