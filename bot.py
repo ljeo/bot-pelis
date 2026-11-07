@@ -3251,6 +3251,16 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Guardar la activación por chat y tema: no depende de user_data ni mezcla temas.
         tema_id = update.message.message_thread_id
         clave_tema = f"{chat.id}:{tema_id if tema_id is not None else 'general'}"
+        clave_sql = f"ia_tema:{clave_tema}".replace("'", "''")
+        try:
+            await ejecutar_turso_sql([
+                "INSERT OR REPLACE INTO config (clave, valor) "
+                f"VALUES ('{clave_sql}', '1')"
+            ])
+        except Exception as error_estado:
+            logger.error("No se pudo guardar la activación de IA en Turso: %s", error_estado, exc_info=True)
+            await update.message.reply_text("⚠️ No pude guardar la activación de la IA. Inténtalo de nuevo.")
+            return
         context.application.bot_data.setdefault("ia_temas_activos", set()).add(clave_tema)
         logger.info("IA activada: chat=%s tema=%s", chat.id, tema_id)
     else:
@@ -3594,7 +3604,21 @@ async def responder_texto_ia(update: Update, context: ContextTypes.DEFAULT_TYPE)
         tema_id = mensaje.message_thread_id
         clave_tema = f"{chat.id}:{tema_id if tema_id is not None else 'general'}"
         temas_activos = context.application.bot_data.setdefault("ia_temas_activos", set())
-        if clave_tema not in temas_activos:
+        activo = clave_tema in temas_activos
+        if not activo:
+            clave_sql = f"ia_tema:{clave_tema}".replace("'", "''")
+            try:
+                resultado_estado = await ejecutar_turso_sql([
+                    f"SELECT valor FROM config WHERE clave = '{clave_sql}' LIMIT 1"
+                ])
+                filas_estado = resultado_estado.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+                activo = bool(filas_estado and str(filas_estado[0][0].get("value", "")) == "1")
+                if activo:
+                    temas_activos.add(clave_tema)
+            except Exception as error_estado:
+                logger.error("No se pudo comprobar la activación de IA en Turso: %s", error_estado, exc_info=True)
+                return
+        if not activo:
             return
         logger.info("Texto IA recibido: chat=%s tema=%s usuario=%s", chat.id, tema_id, update.effective_user.id)
     elif not context.user_data.get("ia_activa", False):
@@ -3612,6 +3636,13 @@ async def finalizar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if chat and chat.type in ("group", "supergroup"):
         tema_id = mensaje.message_thread_id
         clave_tema = f"{chat.id}:{tema_id if tema_id is not None else 'general'}"
+        clave_sql = f"ia_tema:{clave_tema}".replace("'", "''")
+        try:
+            await ejecutar_turso_sql([f"DELETE FROM config WHERE clave = '{clave_sql}'"])
+        except Exception as error_estado:
+            logger.error("No se pudo borrar la activación de IA en Turso: %s", error_estado, exc_info=True)
+            await mensaje.reply_text("⚠️ No pude desactivar la IA correctamente. Inténtalo de nuevo.")
+            return
         context.application.bot_data.setdefault("ia_temas_activos", set()).discard(clave_tema)
         logger.info("IA desactivada: chat=%s tema=%s", chat.id, tema_id)
     else:
