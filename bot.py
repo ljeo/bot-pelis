@@ -2327,9 +2327,13 @@ async def activar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(
         "🤖 **Gemini está activada para ti.**\n\n"
         "Ya puedes escribirme normalmente y te responderé con IA. "
+        "También puedes preguntar directamente con /ia seguido de tu pregunta. "
         "Para terminar la sesión, usa /apagar.",
         parse_mode="Markdown"
     )
+    # Si el usuario escribió una pregunta junto al comando, responderla de inmediato.
+    if context.args:
+        await responder_con_gemini(update, context, " ".join(context.args))
 
 
 async def apagar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2340,7 +2344,7 @@ async def apagar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("🛑 Gemini se ha apagado. El bot vuelve a su funcionamiento normal.")
 
 
-async def responder_con_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def responder_con_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_override: str = "") -> None:
     if not update.message or not update.effective_user:
         return
     if not context.user_data.get("gemini_activa"):
@@ -2349,7 +2353,7 @@ async def responder_con_gemini(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("esperando_foto_bienvenida") or context.user_data.get("esperando_texto_bienvenida"):
         return
 
-    texto = (update.message.text or "").strip()
+    texto = (texto_override or update.message.text or "").strip()
     if not texto:
         return
     if not GEMINI_API_KEY:
