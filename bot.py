@@ -2006,9 +2006,29 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
         if temporada_solicitada.strip().lower() != temporada_objetivo:
             continue
         try:
+            texto_notificacion = (
+                f"🎉 ¡Tu petición ha sido agregada al catálogo!\\n\\n"
+                f"📺 Contenido: <b>{escape(titulo_solicitado)}</b>\\n\\n"
+                "Abre el catálogo actualizado para encontrarlo."
+            )
+            # Para solicitudes hechas en grupos, se intenta el DM sin perder
+            # el aviso original del grupo. En privado solo se envía una vez.
+            if chat_id != user_id:
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=texto_notificacion,
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+                except Exception as e_dm:
+                    logger.info(
+                        f"No se pudo enviar DM al usuario {user_id}; se conserva el aviso en el grupo: {e_dm}"
+                    )
+
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"🎉 ¡Tu petición ha sido agregada al catálogo!\n\n📺 Contenido: <b>{escape(titulo_solicitado)}</b>\n\nAbre el catálogo actualizado para encontrarlo.",
+                text=texto_notificacion,
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
@@ -3115,17 +3135,22 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         # El catálogo se consulta en modo lectura; no se crean ni modifican registros.
         catalogo = []
+        registros_catalogo = []
         try:
             resultado_catalogo = await ejecutar_turso_sql([
-                "SELECT titulo, temporada FROM peliculas ORDER BY id DESC LIMIT 60"
+                "SELECT id, temporada, titulo FROM peliculas ORDER BY id DESC"
             ])
             filas = resultado_catalogo.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
             vistos = set()
             for fila in filas:
-                titulo = str(fila[0].get("value", "")) if len(fila) > 0 else ""
+                id_registro = str(fila[0].get("value", "")) if len(fila) > 0 else ""
                 temporada = str(fila[1].get("value", "General")) if len(fila) > 1 else "General"
+                titulo = str(fila[2].get("value", "")) if len(fila) > 2 else ""
+                if not id_registro or not titulo:
+                    continue
+                registros_catalogo.append((id_registro, temporada, titulo))
                 clave = (titulo.casefold(), temporada.casefold())
-                if titulo and clave not in vistos:
+                if clave not in vistos and len(catalogo) < 60:
                     vistos.add(clave)
                     catalogo.append(f"- {titulo} ({temporada})")
         except Exception as error_catalogo:
@@ -3181,7 +3206,43 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )[-10:]
         registro["cantidad"] += 1
         estado[user_key] = registro
-        await update.message.reply_text(respuesta_texto[:3900])
+
+        # La disponibilidad se comprueba en Turso, no por lo que diga Gemini.
+        # Los botones reutilizan el callback real de /buscar para entregar archivos.
+        pregunta_normalizada = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(pregunta)).strip()
+        keyboard_ia = []
+        vistos_ia = set()
+        for id_registro, temporada, titulo_registro in registros_catalogo:
+            if temporada == "General":
+                nombre_catalogo = re.sub(r"\\s*\\([^)]*\\)", " ", titulo_registro)
+                nombre_catalogo = re.sub(r"\\b(?:19|20)\\d{2}\\b", " ", nombre_catalogo)
+            else:
+                nombre_catalogo = extraer_nombre_base_serie(titulo_registro)
+            nombre_normalizado = re.sub(
+                r"[^a-z0-9]+", " ",
+                normalizar_busqueda(nombre_catalogo)
+            ).strip()
+            if not nombre_normalizado:
+                continue
+            coincide = f" {nombre_normalizado} " in f" {pregunta_normalizada} "
+            if not coincide:
+                continue
+            clave = (nombre_normalizado, temporada.casefold())
+            if clave in vistos_ia:
+                continue
+            vistos_ia.add(clave)
+            if temporada == "General":
+                etiqueta = f"🎬 Ver: {titulo_para_boton_pelicula(titulo_registro)}"
+            else:
+                etiqueta = f"📺 Ver: {nombre_catalogo.strip()} - {temporada}"
+            keyboard_ia.append([
+                InlineKeyboardButton(etiqueta[:64], callback_data=f"seltemp_id_{id_registro}_{temporada}")
+            ])
+
+        await update.message.reply_text(
+            respuesta_texto[:3500],
+            reply_markup=InlineKeyboardMarkup(keyboard_ia) if keyboard_ia else None
+        )
     except httpx.TimeoutException:
         await update.message.reply_text("⏳ La IA está tardando demasiado. Inténtalo otra vez.")
     except Exception as error:
