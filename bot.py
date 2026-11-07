@@ -2875,10 +2875,10 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if patron_serie and rows:
             def normalizar_serie_para_pedir(valor):
                 valor = normalizar_busqueda(str(valor or ""))
-                valor = re.sub(r"\\b(?:temporada|temp)\\s*\\d+\\b", " ", valor)
-                valor = re.sub(r"\\b\\d{1,2}[xX]\\d{1,2}\\b|\\b[sS]\\d{1,2}[eE]\\d{1,2}\\b", " ", valor)
+                valor = re.sub(r"\b(?:temporada|temp)\s*\d+\b", " ", valor)
+                valor = re.sub(r"\b\d{1,2}[xX]\d{1,2}\b|\b[sS]\d{1,2}[eE]\d{1,2}\b", " ", valor)
                 valor = re.sub(r"[^a-z0-9]+", " ", valor)
-                return re.sub(r"\\s+", " ", valor).strip()
+                return re.sub(r"\s+", " ", valor).strip()
 
             palabras_solicitadas = normalizar_serie_para_pedir(titulo_solicitado).split()
             coincidentes = []
