@@ -3689,7 +3689,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         if not respuesta_texto and es_pregunta_sinopsis:
             # Si ambos servicios de IA fallan, entregar directamente la sinopsis de TMDb.
-            coincidencia = re.search(r"; Sinopsis: ([^\\n]+)", datos_tmdb or "")
+            coincidencia = re.search(r"; Sinopsis: ([^\n]+)", datos_tmdb or "")
             sinopsis_respaldo = coincidencia.group(1).strip() if coincidencia else ""
             if sinopsis_respaldo and sinopsis_respaldo.lower() != "no disponible":
                 respuesta_texto = sinopsis_respaldo
@@ -3701,12 +3701,14 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         logger.info("Respuesta de IA generada mediante %s.", proveedor_usado or "proveedor disponible")
         # Nunca mostrar al usuario análisis interno o metadatos de planificación del modelo.
-        if es_pregunta_sinopsis and re.search(
-            r"(?is)^\s*(?:analyze the request|analysis of the request|request analysis|"
-            r"analiza la solicitud|análisis de la solicitud|user\s*:|language\s*:|"
-            r"task\s*:|data source\s*:)",
-            respuesta_texto
-        ):
+        # Detecta encabezados de análisis aunque incluyan formato Markdown.
+        patron_analisis = (
+            r"(?is)^\s*(?:[#>*_`-]+\s*)?"
+            r"(?:analyze\s+the\s+request|analysis(?:\s+of\s+the\s+request)?|"
+            r"request\s+analysis|analiza\s+la\s+solicitud|análisis\s+de\s+la\s+solicitud|"
+            r"user|language|task|data\s+source)\s*:"
+        )
+        if es_pregunta_sinopsis and re.search(patron_analisis, respuesta_texto):
             # Si el modelo devuelve análisis interno, usar la sinopsis real de TMDb.
             coincidencia = re.search(r"; Sinopsis: ([^\n]+)", datos_tmdb or "")
             sinopsis_respaldo = coincidencia.group(1).strip() if coincidencia else ""
