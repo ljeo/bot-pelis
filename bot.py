@@ -2007,8 +2007,8 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
             continue
         try:
             texto_notificacion = (
-                f"🎉 ¡Tu petición ha sido agregada al catálogo!\\n\\n"
-                f"📺 Contenido: <b>{escape(titulo_solicitado)}</b>\\n\\n"
+                f"🎉 ¡Tu petición ha sido agregada al catálogo!\n\n"
+                f"📺 Contenido: <b>{escape(titulo_solicitado)}</b>\n\n"
                 "Abre el catálogo actualizado para encontrarlo."
             )
             # Para solicitudes hechas en grupos, se intenta el DM sin perder
@@ -3214,8 +3214,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         vistos_ia = set()
         for id_registro, temporada, titulo_registro in registros_catalogo:
             if temporada == "General":
-                nombre_catalogo = re.sub(r"\\s*\\([^)]*\\)", " ", titulo_registro)
-                nombre_catalogo = re.sub(r"\\b(?:19|20)\\d{2}\\b", " ", nombre_catalogo)
+                nombre_catalogo = re.sub(r"\s*\\([^)]*\\)", " ", titulo_registro)
+                nombre_catalogo = re.sub(r"\b(?:19|20)\d{2}\b", " ", nombre_catalogo)
             else:
                 nombre_catalogo = extraer_nombre_base_serie(titulo_registro)
             nombre_normalizado = re.sub(
