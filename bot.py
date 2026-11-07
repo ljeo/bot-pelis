@@ -2190,11 +2190,21 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             return
         try:
             ids_sql=",".join(str(int(x)) for x in ids)
-            res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada='General'"])
+            res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE id IN ({ids_sql}) AND temporada='General'"])
             rows=res.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
             count=int(rows[0][0].get("value",0)) if rows else 0
-            await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada='General'"])
-            await editar_o_enviar(query,f"✅ Películas eliminadas.\n🗑️ Archivos borrados: {count}")
+            if count:
+                await ejecutar_turso_sql([
+                    f"DELETE FROM saga_peliculas WHERE pelicula_id IN ({ids_sql})",
+                    f"DELETE FROM peliculas WHERE id IN ({ids_sql}) AND temporada='General'"
+                ])
+            verificacion=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE id IN ({ids_sql}) AND temporada='General'"])
+            restantes=verificacion.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
+            pendientes=int(restantes[0][0].get("value",0)) if restantes else 0
+            if pendientes:
+                await editar_o_enviar(query,f"⚠️ No se pudieron borrar todos los registros. Siguen en la base de datos: {pendientes}.")
+            else:
+                await editar_o_enviar(query,f"✅ Películas eliminadas de la base de datos.\n🗑️ Archivos borrados: {count}")
         except Exception as e:
             logger.error(f"Error eliminando películas: {e}",exc_info=True)
             await editar_o_enviar(query,"❌ No se pudieron eliminar las películas.")
@@ -2208,11 +2218,17 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             return
         try:
             ids_sql=",".join(str(int(x)) for x in ids)
-            res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada!='General'"])
+            res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
             rows=res.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
             count=int(rows[0][0].get("value",0)) if rows else 0
             await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
-            await editar_o_enviar(query,f"✅ Serie eliminada.\n🗑️ Capítulos borrados: {count}")
+            verificacion=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
+            restantes=verificacion.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
+            pendientes=int(restantes[0][0].get("value",0)) if restantes else 0
+            if pendientes:
+                await editar_o_enviar(query,f"⚠️ La serie no se eliminó por completo. Registros restantes: {pendientes}.")
+            else:
+                await editar_o_enviar(query,f"✅ Serie eliminada de la base de datos.\n🗑️ Capítulos borrados: {count}")
         except Exception as e:
             logger.error(f"Error eliminando serie: {e}",exc_info=True)
             await editar_o_enviar(query,"❌ No se pudo eliminar la serie.")
@@ -2247,11 +2263,17 @@ async def boton_eliminar_pelicula(update: Update, context: ContextTypes.DEFAULT_
             return
         try:
             ids_sql=",".join(str(int(x)) for x in ids)
-            res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE chat_id='{chat_id}' AND id IN ({ids_sql}) AND temporada!='General'"])
+            res=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
             rows=res.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
             count=int(rows[0][0].get("value",0)) if rows else 0
             await ejecutar_turso_sql([f"DELETE FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
-            await editar_o_enviar(query,f"✅ {selection['temporada']} eliminada.\n🗑️ Capítulos borrados: {count}")
+            verificacion=await ejecutar_turso_sql([f"SELECT COUNT(*) FROM peliculas WHERE id IN ({ids_sql}) AND temporada!='General'"])
+            restantes=verificacion.get("results",[{}])[0].get("response",{}).get("result",{}).get("rows",[])
+            pendientes=int(restantes[0][0].get("value",0)) if restantes else 0
+            if pendientes:
+                await editar_o_enviar(query,f"⚠️ {selection['temporada']} no se eliminó por completo. Registros restantes: {pendientes}.")
+            else:
+                await editar_o_enviar(query,f"✅ {selection['temporada']} eliminada de la base de datos.\n🗑️ Capítulos borrados: {count}")
         except Exception as e:
             logger.error(f"Error eliminando temporada: {e}",exc_info=True)
             await editar_o_enviar(query,"❌ No se pudo eliminar la temporada.")
@@ -3210,6 +3232,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
+    context.chat_data["ia_activa"] = True
     context.user_data["ia_activa"] = True
     pregunta = " ".join(context.args or []).strip() or context.user_data.pop("ia_pregunta_pendiente", "").strip()
     if not pregunta:
@@ -3543,7 +3566,7 @@ async def responder_texto_ia(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Envía a Gemini los mensajes normales mientras la IA esté activada para este usuario."""
     if not update.message or not update.effective_user:
         return
-    if not context.user_data.get("ia_activa", False):
+    if not (context.chat_data.get("ia_activa", False) or context.user_data.get("ia_activa", False)):
         return
     context.user_data["ia_pregunta_pendiente"] = update.message.text or ""
     await comando_ia(update, context)
@@ -3552,6 +3575,7 @@ async def responder_texto_ia(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def finalizar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
+    context.chat_data["ia_activa"] = False
     context.user_data["ia_activa"] = False
     context.user_data.pop("ia_pregunta_pendiente", None)
     context.user_data.pop("ia_historial", None)
