@@ -2454,10 +2454,24 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
 
+        # Comparar palabras completas y consecutivas, no subcadenas:
+        # buscar "it" no debe encontrar "Captain" ni "Chespirito".
+        palabras_consulta = re.findall(r"[a-z0-9]+", query_normalizada)
+        def coincide_titulo_busqueda(titulo):
+            palabras_titulo = re.findall(
+                r"[a-z0-9]+",
+                normalizar_busqueda(str(titulo or ""))
+            )
+            longitud = len(palabras_consulta)
+            return bool(longitud) and any(
+                palabras_titulo[i:i + longitud] == palabras_consulta
+                for i in range(len(palabras_titulo) - longitud + 1)
+            )
+
         rows = [
             row for row in rows
             if len(row) > 2
-            and query_normalizada in normalizar_busqueda(str(row[2].get("value", "")))
+            and coincide_titulo_busqueda(row[2].get("value", ""))
         ]
         rows.sort(key=lambda row: normalizar_busqueda(str(row[2].get("value", ""))))
 
