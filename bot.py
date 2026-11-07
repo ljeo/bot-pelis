@@ -32,6 +32,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
+TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 
 SUPER_ADMIN_ID = 6709726108  
 
@@ -3235,6 +3236,67 @@ async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_message(chat_id=query.message.chat_id, text="❌ No pude registrar la petición. Inténtalo de nuevo o utiliza /pedir.")
 
 
+async def buscar_datos_tmdb(pregunta: str) -> str:
+    """Consulta TMDb para preguntas explícitas sobre datos de películas o series."""
+    if not TMDB_API_KEY:
+        return ""
+
+    pregunta_norm = normalizar_busqueda(pregunta)
+    consulta_datos = bool(re.search(
+        r"\b(?:ano|fecha|estreno|estren[oó]|lanzamiento|cuando salio|cuando se estreno|release date|release year|when did|premiere|fecha de lanzamiento)\b",
+        pregunta_norm
+    ))
+    if not consulta_datos:
+        return ""
+
+    consulta = pregunta
+    patrones = [
+        r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada)\s+",
+        r"^(?:what year was|when was|release date of|release year of)\s+",
+        r"\s+(?:se estreno|salio|fue estrenada|fue lanzada)\??$",
+        r"\s+(?:en que ano|que ano|fecha de estreno|release date|release year)\??$"
+    ]
+    for patron in patrones:
+        consulta = re.sub(patron, "", consulta, flags=re.IGNORECASE).strip()
+    consulta = re.sub(r"^[¿?¡!\s]+|[¿?¡!\s]+$", "", consulta).strip()
+    if len(consulta) < 2:
+        return ""
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            respuesta = await client.get(
+                "https://api.themoviedb.org/3/search/multi",
+                params={"api_key": TMDB_API_KEY, "query": consulta,
+                        "language": "es-ES", "include_adult": "false", "page": 1}
+            )
+        if respuesta.status_code != 200:
+            logger.warning("TMDb devolvió HTTP %s: %s", respuesta.status_code, respuesta.text[:300])
+            return ""
+        datos = []
+        for item in respuesta.json().get("results", []):
+            tipo = item.get("media_type")
+            if tipo not in ("movie", "tv"):
+                continue
+            titulo = item.get("title") or item.get("name") or ""
+            fecha = item.get("release_date") if tipo == "movie" else item.get("first_air_date")
+            anio = fecha[:4] if isinstance(fecha, str) and re.match(r"^\d{4}", fecha) else "no disponible"
+            if not titulo:
+                continue
+            tipo_es = "película" if tipo == "movie" else "serie"
+            titulo_original = item.get("original_title") or item.get("original_name") or "no disponible"
+            sinopsis = (item.get("overview") or "no disponible")[:500]
+            datos.append("- Tipo: " + tipo_es + "; Título: " + titulo +
+                         "; Título original: " + titulo_original +
+                         "; Fecha de estreno: " + str(fecha or "no disponible") +
+                         "; Año: " + anio + "; Sinopsis: " + sinopsis)
+            if len(datos) >= 5:
+                break
+        return "\n".join(datos)
+    except Exception as error_tmdb:
+        logger.warning("No se pudo consultar TMDb: %s", error_tmdb)
+        return ""
+
+
 async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Asistente conversacional opcional; no modifica datos ni comandos existentes."""
     if not update.message or not update.effective_user:
@@ -3427,6 +3489,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         except Exception as error_catalogo:
             logger.warning("No se pudo cargar el catálogo para el asistente: %s", error_catalogo)
 
+        datos_tmdb = await buscar_datos_tmdb(pregunta)
         historial = context.user_data.get("ia_historial", [])
         historial = historial[-8:]
         contenidos = list(historial)
@@ -3445,6 +3508,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "Responde en texto sencillo y limpio: no uses Markdown, asteriscos, negritas, encabezados, listas con símbolos ni bloques de código. Mantén las respuestas breves y naturales.\\n\\n"
             "CATÁLOGO ACTUAL COMPLETO (cada línea es un registro real de Turso; General significa sin temporada):\\n"
             + ("\n".join(catalogo) if catalogo else "No se pudo obtener el catálogo.")
+            + "\n\nDATOS DE TMDB (fuente externa; usa estos datos solo si corresponden al título preguntado; si no hay coincidencia clara, indica que no pudiste identificarlo):\n"
+            + (datos_tmdb if datos_tmdb else "No hay resultados de TMDb para esta consulta o no se consultó. No inventes fechas ni años.")
         )
         respuesta_texto = ""
         proveedor_usado = None
