@@ -3448,10 +3448,23 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             tokens = nombre_norm.split()
             consulta = pregunta_normalizada.split()
             anios = [t for t in tokens if re.fullmatch(r"(?:19|20)\d{2}", t)]
-            tokens_nombre = [t for t in tokens if t not in anios]
-            if not all(t in consulta for t in tokens_nombre):
+            anios_pedidos = [t for t in consulta if re.fullmatch(r"(?:19|20)\d{2}", t)]
+            palabras_ruido = {
+                "quiero", "dame", "envia", "mandame", "pasame", "ver", "busco",
+                "buscar", "ponme", "muestrame", "mostrar", "descargar", "pelicula",
+                "peliculas", "serie", "series", "anime", "animes", "la", "el", "los",
+                "las", "de", "del", "con", "por", "favor", "ano", "del", "una", "un"
+            }
+            terminos_pedidos = [
+                t for t in consulta
+                if t not in palabras_ruido and not re.fullmatch(r"(?:19|20)\d{2}", t)
+            ]
+            tokens_nombre = [t for t in tokens if not re.fullmatch(r"(?:19|20)\d{2}", t)]
+            if not terminos_pedidos or not all(t in tokens_nombre for t in terminos_pedidos):
                 return False
-            return not anios or all(anio in consulta for anio in anios)
+            if anios_pedidos and not all(anio in anios for anio in anios_pedidos):
+                return False
+            return True
 
         if pide_contenido:
             # Si solicita expresamente la saga, mostrar el botón de saga real.
