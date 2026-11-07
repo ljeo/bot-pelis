@@ -8,6 +8,7 @@ import unicodedata
 from html import escape
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
+from telegram.error import Forbidden
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
 from telegram.ext import (
     ApplicationBuilder,
@@ -237,13 +238,22 @@ async def init_db() -> None:
             message_id INTEGER NOT NULL
         )
     """
+    sql_confirmaciones_ia = """
+        CREATE TABLE IF NOT EXISTS confirmaciones_peticion_ia (
+            id TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            titulo TEXT NOT NULL,
+            temporada TEXT DEFAULT 'General'
+        )
+    """
     sql_bienvenidas_grupos = """
         CREATE TABLE IF NOT EXISTS bienvenidas_grupos (
             chat_id TEXT PRIMARY KEY,
             message_id INTEGER NOT NULL
         )
     """
-    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes, sql_avisos_permisos, sql_bienvenidas_grupos])
+    await ejecutar_turso_sql([sql_peliculas, sql_usuarios, sql_admins, sql_config, sql_solicitudes, sql_avisos_permisos, sql_bienvenidas_grupos, sql_confirmaciones_ia])
     try:
         await ejecutar_turso_sql(["ALTER TABLE solicitudes ADD COLUMN mensaje_id INTEGER"])
     except Exception as e:
@@ -2787,8 +2797,11 @@ async def boton_ver_episodio(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         if file_id and file_id != "None":
                             await context.bot.send_video(chat_id=user_id, video=file_id, caption=f"📁 {nombre_cap}")
                     await editar_o_enviar(query, "✅ ¡Te lo he enviado a tu chat privado!")
-                except Exception:
-                    await editar_o_enviar(query, "⚠️ No pude enviarte mensajes al privado. Abre un chat privado conmigo y dale a **Iniciar** (/start).")
+                except Forbidden:
+                    await editar_o_enviar(query, "🔒 Para recibir la película por privado, abre este bot en Telegram y pulsa **Iniciar** (/start). Después vuelve aquí y pulsa «En mensaje privado» otra vez.")
+                except Exception as error_privado:
+                    logger.error("Error enviando contenido al privado del usuario %s: %s", user_id, error_privado, exc_info=True)
+                    await editar_o_enviar(query, "⚠️ No se pudo completar el envío privado. Puedes recibirlo en este chat o iniciar el bot en privado y volver a intentarlo.")
             else:
                 try:
                     await query.message.delete()
@@ -3219,43 +3232,40 @@ async def registrar_peticion_desde_ia(update: Update, context: ContextTypes.DEFA
 async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    confirmaciones = context.application.bot_data.setdefault("ia_peticion_confirmaciones", {})
-    clave_confirmacion = f"{query.message.chat_id}:{query.message.message_id}"
-    peticion = confirmaciones.get(clave_confirmacion)
-    # Recuperar el título del propio mensaje si la memoria temporal se perdió
-    # (por ejemplo, tras un reinicio de Render) y el usuario pulsa un botón antiguo.
-    if not peticion and query.message and query.message.text:
-        recuperada = re.search(
-            r"No encuentro\s+«(.+?)»\s+en el catálogo",
-            query.message.text,
-            re.IGNORECASE | re.DOTALL
-        )
-        if recuperada:
-            peticion = {
-                "titulo": recuperada.group(1).strip(),
-                "temporada": "General",
-                "chat_id": query.message.chat_id,
-                "user_id": update.effective_user.id
-            }
-    if (
-        not peticion
-        or str(peticion.get("chat_id")) != str(query.message.chat_id)
-        or str(peticion.get("user_id")) != str(update.effective_user.id)
-    ):
-        await editar_o_enviar(query, "⚠️ Esta confirmación ya no está disponible. Vuelve a escribir «pedir» para comprobar el catálogo.")
+    partes = (query.data or "").split("_", 3)
+    if len(partes) != 4 or partes[:2] != ["ia", "req"] or partes[2] not in ("yes", "no"):
+        await editar_o_enviar(query, "⚠️ Esta confirmación no es válida. Vuelve a escribir «pedir».")
         return
-    if query.data == "ia_req_no":
-        confirmaciones.pop(clave_confirmacion, None)
-        await editar_o_enviar(query, "De acuerdo, no he registrado ninguna petición.")
-        return
-    confirmaciones.pop(clave_confirmacion, None)
+
+    accion, confirmacion_id = partes[2], partes[3]
+    chat_sql = str(query.message.chat_id).replace("'", "''")
+    user_sql = str(update.effective_user.id).replace("'", "''")
     try:
+        resultado = await ejecutar_turso_sql([
+            "SELECT chat_id, user_id, titulo, temporada FROM confirmaciones_peticion_ia "
+            f"WHERE id = '{confirmacion_id}' LIMIT 1"
+        ])
+        filas = resultado.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+        if not filas:
+            await editar_o_enviar(query, "⚠️ Esta confirmación ya no está disponible. Vuelve a escribir «pedir» para comprobar el catálogo.")
+            return
+
+        valores = [str(campo.get("value", "")) for campo in filas[0]]
+        peticion = {"chat_id": valores[0], "user_id": valores[1], "titulo": valores[2], "temporada": valores[3] or "General"}
+        if peticion["chat_id"] != chat_sql or peticion["user_id"] != user_sql:
+            await editar_o_enviar(query, "⚠️ Esta confirmación pertenece a otro usuario o chat.")
+            return
+
+        await ejecutar_turso_sql([f"DELETE FROM confirmaciones_peticion_ia WHERE id = '{confirmacion_id}'"])
+        if accion == "no":
+            await editar_o_enviar(query, "De acuerdo, no he registrado ninguna petición.")
+            return
+
         await editar_o_enviar(query, "⏳ Registrando tu petición...")
         await registrar_peticion_desde_ia(update, context, peticion)
     except Exception as error:
         logger.error("Error registrando petición confirmada por Gemini: %s", error, exc_info=True)
         await context.bot.send_message(chat_id=query.message.chat_id, text="❌ No pude registrar la petición. Inténtalo de nuevo o utiliza /pedir.")
-
 
 async def buscar_datos_tmdb(pregunta: str) -> str:
     """Consulta TMDb para preguntas explícitas sobre datos de películas o series."""
@@ -3481,19 +3491,20 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     "titulo": titulo_pedido, "temporada": "General",
                     "chat_id": update.effective_chat.id
                 }
+                confirmacion_id = secrets.token_hex(6)
+                titulo_sql = titulo_pedido.replace("'", "''")
+                await ejecutar_turso_sql([
+                    "INSERT INTO confirmaciones_peticion_ia (id, chat_id, user_id, titulo, temporada) "
+                    f"VALUES ('{confirmacion_id}', '{update.effective_chat.id}', '{update.effective_user.id}', '{titulo_sql}', 'General')"
+                ])
                 teclado_peticion = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📩 Sí, quiero pedirla", callback_data="ia_req_yes"),
-                    InlineKeyboardButton("❌ Cancelar", callback_data="ia_req_no")
+                    InlineKeyboardButton("📩 Sí, quiero pedirla", callback_data=f"ia_req_yes_{confirmacion_id}"),
+                    InlineKeyboardButton("❌ Cancelar", callback_data=f"ia_req_no_{confirmacion_id}")
                 ]])
-                mensaje_confirmacion = await update.message.reply_text(
+                await update.message.reply_text(
                     f"🔎 No encuentro «{titulo_pedido}» en el catálogo. ¿Quieres que envíe una petición al administrador?",
                     reply_markup=teclado_peticion
                 )
-                confirmaciones = context.application.bot_data.setdefault("ia_peticion_confirmaciones", {})
-                confirmaciones[f"{update.effective_chat.id}:{mensaje_confirmacion.message_id}"] = {
-                    "titulo": titulo_pedido, "temporada": "General",
-                    "chat_id": update.effective_chat.id, "user_id": update.effective_user.id
-                }
         except Exception as error_busqueda:
             logger.error("Error comprobando el catálogo para una petición IA: %s", error_busqueda, exc_info=True)
             await update.message.reply_text("⚠️ No pude consultar el catálogo ahora mismo. Inténtalo de nuevo.")
@@ -3534,9 +3545,16 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             numero = next(x for x in mtemp.groups() if x)
             context.user_data.pop("ia_peticion_falta_temporada", None)
             context.user_data["ia_peticion_pendiente"] = {"titulo": falta_temp, "temporada": f"Temporada {int(numero)}", "chat_id": update.effective_chat.id}
+            confirmacion_id = secrets.token_hex(6)
+            titulo_sql = falta_temp.replace("'", "''")
+            temporada_confirmada = f"Temporada {int(numero)}"
+            await ejecutar_turso_sql([
+                "INSERT INTO confirmaciones_peticion_ia (id, chat_id, user_id, titulo, temporada) "
+                f"VALUES ('{confirmacion_id}', '{update.effective_chat.id}', '{update.effective_user.id}', '{titulo_sql}', '{temporada_confirmada}')"
+            ])
             teclado = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Sí, registrar petición", callback_data="ia_req_yes"),
-                InlineKeyboardButton("❌ Cancelar", callback_data="ia_req_no")
+                InlineKeyboardButton("✅ Sí, registrar petición", callback_data=f"ia_req_yes_{confirmacion_id}"),
+                InlineKeyboardButton("❌ Cancelar", callback_data=f"ia_req_no_{confirmacion_id}")
             ]])
             await update.message.reply_text(f"📩 ¿Confirmas que registre *{falta_temp} - Temporada {int(numero)}*?", reply_markup=teclado, parse_mode="Markdown")
             return
@@ -4009,7 +4027,7 @@ def main() -> None:
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
     application.add_handler(CommandHandler("buscar", buscar_pelicula))
     application.add_handler(CommandHandler("pedir", pedir_contenido))
-    application.add_handler(CallbackQueryHandler(callback_peticion_ia, pattern="^ia_req_(yes|no)$"))
+    application.add_handler(CallbackQueryHandler(callback_peticion_ia, pattern="^ia_req_(yes|no)_[a-f0-9]+$"))
     application.add_handler(CommandHandler("eliminar", menu_eliminar_contenido))
     application.add_handler(CommandHandler("addadmin", agregar_admin))
     application.add_handler(CommandHandler("deladmin", quitar_admin))
