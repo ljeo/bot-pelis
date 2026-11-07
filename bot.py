@@ -3641,6 +3641,14 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         respuesta_texto = re.sub(r"(?m)^\s*[-*•]\s+", "", respuesta_texto)
         respuesta_texto = re.sub(r"(?m)^\s*\d+[.)]\s+", "", respuesta_texto)
         respuesta_texto = re.sub(r"\n{3,}", "\n\n", respuesta_texto).strip()
+        if es_pregunta_sinopsis and respuesta_texto:
+            # Límite aplicado por el bot, no solo como instrucción al modelo:
+            # evita respuestas extensas aunque el proveedor ignore el prompt.
+            frases = re.split(r"(?<=[.!?])\s+|\n+", respuesta_texto)
+            respuesta_texto = " ".join(frase.strip() for frase in frases[:5] if frase.strip())
+            palabras = respuesta_texto.split()
+            if len(palabras) > 70:
+                respuesta_texto = " ".join(palabras[:70]).rstrip(" ,;:-") + "…"
         if not respuesta_texto:
             await update.message.reply_text("⚠️ La IA no pudo generar una respuesta. Prueba con otra pregunta.")
             return
