@@ -1970,12 +1970,26 @@ async def boton_temporada_guardar(update: Update, context: ContextTypes.DEFAULT_
 async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Avisa a quienes pidieron el contenido, comparando títulos normalizados."""
     def normalizar_titulo(valor: str) -> str:
-        valor = (valor or "").lower().strip()
-        valor = re.sub(r"\s+\d{4}$", "", valor)
-        valor = re.sub(r"\b(temporada|temp)\s*\d+\b", "", valor)
-        valor = re.sub(r"\b\d{1,2}[xX]\d{1,2}\b|\b[sS]\d{1,2}[eE]\d{1,2}\b", "", valor)
-        valor = re.sub(r"[^a-z0-9áéíóúüñ]", "", valor)
-        return valor
+        valor = normalizar_busqueda(valor or "")
+        valor = re.sub(r"\b(?:19|20)\d{2}\b", " ", valor)
+        valor = re.sub(r"\b(?:temporada|temp)\s*\d+\b", " ", valor)
+        valor = re.sub(r"\b\d{1,2}[xX]\d{1,2}\b|\b[sS]\d{1,2}[eE]\d{1,2}\b", " ", valor)
+        return re.sub(r"[^a-z0-9]+", " ", valor).strip()
+
+    def coincide_titulo_solicitud(solicitado: str, disponible: str) -> bool:
+        pedido = normalizar_titulo(solicitado).split()
+        agregado = normalizar_titulo(disponible).split()
+        if not pedido or not agregado:
+            return False
+        # Acepta subtítulos o prefijos editoriales del canal, pero solo
+        # cuando el título pedido aparece como secuencia completa de palabras.
+        return any(
+            agregado[i:i + len(pedido)] == pedido
+            for i in range(len(agregado) - len(pedido) + 1)
+        ) or any(
+            pedido[i:i + len(agregado)] == agregado
+            for i in range(len(pedido) - len(agregado) + 1)
+        )
 
     titulo_objetivo = normalizar_titulo(titulo_base)
     temporada_objetivo = (temporada_guardada or "General").strip().lower()
@@ -2003,7 +2017,7 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
         temporada_solicitada = str(row[4].get("value", "General"))
         mensaje_id_valor = row[5].get("value") if len(row) > 5 else None
         admin_mensaje_id_valor = row[6].get("value") if len(row) > 6 else None
-        if normalizar_titulo(titulo_solicitado) != titulo_objetivo:
+        if not coincide_titulo_solicitud(titulo_solicitado, titulo_base):
             continue
         if temporada_solicitada.strip().lower() != temporada_objetivo:
             continue
