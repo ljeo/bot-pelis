@@ -3110,7 +3110,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    await update.message.chat.send_action("typing")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
         # El catálogo se consulta en modo lectura; no se crean ni modifican registros.
         catalogo = []
