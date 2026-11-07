@@ -3278,6 +3278,70 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⚠️ La pregunta es demasiado larga. Usa un máximo de 1000 caracteres.")
         return
 
+    # Flujo directo de petición: primero pide el título y después comprueba
+    # el catálogo real antes de ofrecer registrar la solicitud.
+    pregunta_peticion = normalizar_busqueda(pregunta)
+    if re.fullmatch(r"(?:quiero|quisiera|me gustaria) (?:hacer una )?peticion(?: de)?|(?:quiero|quisiera) pedir|quiero solicitar", pregunta_peticion):
+        context.user_data["ia_esperando_titulo_peticion"] = True
+        await update.message.reply_text("📩 ¡Claro! Dime el nombre de la película o serie y revisaré si ya está en el catálogo.")
+        return
+
+    if context.user_data.pop("ia_esperando_titulo_peticion", False):
+        titulo_pedido = pregunta.strip()
+        titulo_pedido = re.sub(r"^(?:la pelicula|pelicula|la serie|serie|anime)\\s+", "", titulo_pedido, flags=re.IGNORECASE).strip()
+        if not titulo_pedido:
+            context.user_data["ia_esperando_titulo_peticion"] = True
+            await update.message.reply_text("Dime el nombre de la película o serie que quieres pedir.")
+            return
+        try:
+            resultado_busqueda = await ejecutar_turso_sql([
+                "SELECT id, temporada, titulo FROM peliculas ORDER BY id DESC"
+            ])
+            filas_busqueda = resultado_busqueda.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            clave_pedido = clave_serie_catalogo(titulo_pedido)
+            coincidencias = []
+            for fila in filas_busqueda:
+                rid = str(fila[0].get("value", "")) if len(fila) > 0 else ""
+                temp = str(fila[1].get("value", "General")) if len(fila) > 1 else "General"
+                nombre = str(fila[2].get("value", "")) if len(fila) > 2 else ""
+                nombre_base = extraer_nombre_base_serie(nombre) if temp != "General" else nombre
+                if rid and nombre and clave_pedido and (
+                    clave_serie_catalogo(nombre) == clave_pedido
+                    or clave_serie_catalogo(nombre_base) == clave_pedido
+                ):
+                    coincidencias.append((rid, temp, nombre))
+            if coincidencias:
+                botones = []
+                vistos_peticion = set()
+                for rid, temp, nombre in coincidencias:
+                    clave = (rid, temp)
+                    if clave in vistos_peticion:
+                        continue
+                    vistos_peticion.add(clave)
+                    etiqueta = f"📺 Ver: {extraer_nombre_base_serie(nombre)} - {temp}" if temp != "General" else f"🎬 Ver: {nombre}"
+                    botones.append([InlineKeyboardButton(etiqueta[:64], callback_data=f"seltemp_id_{rid}_{temp}")])
+                await update.message.reply_text(
+                    f"🎉 ¡{titulo_pedido} ya está en el catálogo! No hace falta pedirlo. Puedes abrirlo aquí:",
+                    reply_markup=InlineKeyboardMarkup(botones)
+                )
+            else:
+                context.user_data["ia_peticion_pendiente"] = {
+                    "titulo": titulo_pedido, "temporada": "General",
+                    "chat_id": update.effective_chat.id
+                }
+                teclado_peticion = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📩 Sí, quiero pedirla", callback_data="ia_req_yes"),
+                    InlineKeyboardButton("❌ Cancelar", callback_data="ia_req_no")
+                ]])
+                await update.message.reply_text(
+                    f"🔎 No encuentro «{titulo_pedido}» en el catálogo. ¿Quieres que envíe una petición al administrador?",
+                    reply_markup=teclado_peticion
+                )
+        except Exception as error_busqueda:
+            logger.error("Error comprobando el catálogo para una petición IA: %s", error_busqueda, exc_info=True)
+            await update.message.reply_text("⚠️ No pude consultar el catálogo ahora mismo. Inténtalo de nuevo.")
+        return
+
     # Las peticiones explícitas de catálogo se resuelven con el catálogo real
     # del bot, sin dejar que el modelo convierta la intención en una recomendación.
     pregunta_catalogo = normalizar_busqueda(pregunta)
