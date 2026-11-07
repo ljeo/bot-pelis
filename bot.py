@@ -3305,7 +3305,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             mensajes_openrouter = [{"role": "system", "content": instruccion}]
             for elemento in contenidos:
                 rol = "assistant" if elemento.get("role") == "model" else "user"
-                texto_elemento = "\\n".join(
+                texto_elemento = "\n".join(
                     parte.get("text", "") for parte in elemento.get("parts", [])
                     if isinstance(parte, dict) and parte.get("text")
                 ).strip()
