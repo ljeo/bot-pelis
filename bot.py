@@ -2461,26 +2461,6 @@ async def buscar_pelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ]
         rows.sort(key=lambda row: normalizar_busqueda(str(row[2].get("value", ""))))
 
-        if patron_pelicula and rows:
-            # El nombre puede ser muy corto (por ejemplo, "It"), así que
-            # LIKE por sí solo también encuentra títulos que solo contienen esas letras.
-            # Exigimos coincidencia exacta del título y del año solicitado.
-            titulo_objetivo = re.sub(
-                r"[^a-z0-9]", "", normalizar_busqueda(titulo_solicitado)
-            )
-            anio_objetivo = patron_pelicula.group(2)
-            filas_exactas = []
-            for fila in rows:
-                titulo_fila = str(fila[2].get("value", "")) if len(fila) > 2 else ""
-                anio_fila = extraer_anio_titulo(titulo_fila)
-                titulo_sin_anio = re.sub(r"\b(?:19|20)\d{2}\b", "", titulo_fila)
-                titulo_normalizado = re.sub(
-                    r"[^a-z0-9]", "", normalizar_busqueda(titulo_sin_anio)
-                )
-                if anio_fila == anio_objetivo and titulo_normalizado == titulo_objetivo:
-                    filas_exactas.append(fila)
-            rows = filas_exactas
-
         if rows:
             keyboard = []
             titulos_vistos = set()
