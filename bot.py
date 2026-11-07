@@ -3414,7 +3414,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         logger.info("Respuesta de IA generada mediante %s.", proveedor_usado or "proveedor disponible")
         # Limpia Markdown incluso si el modelo ignora la instrucción de texto sencillo.
-        respuesta_texto = re.sub(r"\[([^]]+)]([^)]+)", r"\1", respuesta_texto)
+        respuesta_texto = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", respuesta_texto)
         respuesta_texto = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", respuesta_texto)
         respuesta_texto = re.sub(r"\*\*|__|~~|\x60{1,3}", "", respuesta_texto)
         respuesta_texto = re.sub(r"(?m)^\s*[-*•]\s+", "", respuesta_texto)
