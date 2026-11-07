@@ -30,6 +30,8 @@ TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
 SUPER_ADMIN_ID = 6709726108  
 
@@ -3202,9 +3204,9 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not update.message or not update.effective_user:
         return
 
-    if not GEMINI_API_KEY:
+    if not GROQ_API_KEY and not GEMINI_API_KEY:
         await update.message.reply_text(
-            "🤖 El asistente todavía no está configurado. El administrador debe añadir GEMINI_API_KEY en Render."
+            "🤖 El asistente todavía no está configurado. El administrador debe añadir GROQ_API_KEY o GEMINI_API_KEY en Render."
         )
         return
 
@@ -3253,11 +3255,6 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     registro = estado.get(user_key, {"fecha": hoy, "cantidad": 0})
     if registro.get("fecha") != hoy:
         registro = {"fecha": hoy, "cantidad": 0}
-    if registro["cantidad"] >= 10:
-        await update.message.reply_text(
-            "⏳ Has alcanzado el límite diario de 10 consultas gratuitas. Inténtalo mañana."
-        )
-        return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     try:
@@ -3299,33 +3296,87 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "CATÁLOGO ACTUAL (muestra de hasta 60 registros recientes; puede no ser completo):\n"
             + ("\n".join(catalogo) if catalogo else "No se pudo obtener el catálogo.")
         )
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-        async with httpx.AsyncClient(timeout=35.0) as client:
-            respuesta_api = await client.post(
-                url,
-                headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
-                json={
-                    "system_instruction": {"parts": [{"text": instruccion}]},
-                    "contents": contenidos,
-                    "generationConfig": {"maxOutputTokens": 700, "temperature": 0.7}
-                }
-            )
-        if respuesta_api.status_code != 200:
-            logger.error("Gemini devolvió HTTP %s: %s", respuesta_api.status_code, respuesta_api.text[:500])
-            if respuesta_api.status_code in (429, 503):
-                await update.message.reply_text("⏳ El servicio de IA está ocupado o alcanzó su cuota. Inténtalo más tarde.")
-            elif respuesta_api.status_code in (401, 403):
-                await update.message.reply_text("⚠️ La clave de Gemini no es válida o no tiene acceso a la API. Avísale al administrador.")
-            else:
-                await update.message.reply_text("⚠️ No pude obtener una respuesta de la IA. Inténtalo de nuevo más tarde.")
-            return
+        respuesta_texto = ""
+        proveedor_usado = None
 
-        datos = respuesta_api.json()
-        partes = datos.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        respuesta_texto = "\n".join(
-            parte.get("text", "") for parte in partes
-            if isinstance(parte, dict) and parte.get("text") and not parte.get("thought", False)
-        ).strip()
+        # Groq es el proveedor principal. Si falla o alcanza su cuota,
+        # se intenta Gemini sin cambiar el historial ni el resto del flujo.
+        if GROQ_API_KEY:
+            mensajes_groq = [{"role": "system", "content": instruccion}]
+            for elemento in contenidos:
+                rol = "assistant" if elemento.get("role") == "model" else "user"
+                texto_elemento = "\\n".join(
+                    parte.get("text", "") for parte in elemento.get("parts", [])
+                    if isinstance(parte, dict) and parte.get("text")
+                ).strip()
+                if texto_elemento:
+                    mensajes_groq.append({"role": rol, "content": texto_elemento})
+            try:
+                async with httpx.AsyncClient(timeout=35.0) as client:
+                    respuesta_groq = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                        json={
+                            "model": GROQ_MODEL,
+                            "messages": mensajes_groq,
+                            "max_completion_tokens": 700,
+                            "temperature": 0.7
+                        }
+                    )
+                if respuesta_groq.status_code == 200:
+                    datos_groq = respuesta_groq.json()
+                    respuesta_texto = (
+                        datos_groq.get("choices", [{}])[0]
+                        .get("message", {}).get("content", "")
+                    ).strip()
+                    if respuesta_texto:
+                        proveedor_usado = "Groq"
+                    else:
+                        logger.warning("Groq respondió sin texto; se probará Gemini.")
+                else:
+                    logger.warning(
+                        "Groq devolvió HTTP %s: %s. Se probará Gemini.",
+                        respuesta_groq.status_code, respuesta_groq.text[:400]
+                    )
+            except Exception as error_groq:
+                logger.warning("Falló Groq; se probará Gemini: %s", error_groq)
+
+        if not respuesta_texto and GEMINI_API_KEY:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+                async with httpx.AsyncClient(timeout=35.0) as client:
+                    respuesta_api = await client.post(
+                        url,
+                        headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+                        json={
+                            "system_instruction": {"parts": [{"text": instruccion}]},
+                            "contents": contenidos,
+                            "generationConfig": {"maxOutputTokens": 700, "temperature": 0.7}
+                        }
+                    )
+                if respuesta_api.status_code == 200:
+                    datos = respuesta_api.json()
+                    partes = datos.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                    respuesta_texto = "\\n".join(
+                        parte.get("text", "") for parte in partes
+                        if isinstance(parte, dict) and parte.get("text") and not parte.get("thought", False)
+                    ).strip()
+                    if respuesta_texto:
+                        proveedor_usado = "Gemini"
+                else:
+                    logger.error(
+                        "Gemini devolvió HTTP %s: %s",
+                        respuesta_api.status_code, respuesta_api.text[:500]
+                    )
+            except Exception as error_gemini:
+                logger.error("También falló Gemini: %s", error_gemini)
+
+        if not respuesta_texto:
+            await update.message.reply_text(
+                "⏳ Ahora mismo no he podido conectar con los servicios de IA. Inténtalo de nuevo más tarde."
+            )
+            return
+        logger.info("Respuesta de IA generada mediante %s.", proveedor_usado or "proveedor disponible")
         if not respuesta_texto:
             await update.message.reply_text("⚠️ La IA no pudo generar una respuesta. Prueba con otra pregunta.")
             return
