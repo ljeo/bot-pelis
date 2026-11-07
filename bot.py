@@ -675,9 +675,13 @@ def limpiar_titulo_pelicula(caption: str) -> str:
     if not lineas:
         return "Sin Título"
 
-    # La primera barra separa el título de los metadatos (audio, idioma,
-    # subtítulos, calidad, etc.). Conservar únicamente el título y el año.
-    titulo = lineas[0].split("|", 1)[0].strip()
+    # Conservar el título y el año aunque el año aparezca después de la
+    # primera barra; descartar el resto de metadatos de audio/idioma/calidad.
+    primera_linea = lineas[0]
+    anio_primera_linea = re.search(r"\b(19\d{2}|20\d{2})\b", primera_linea)
+    titulo = primera_linea.split("|", 1)[0].strip()
+    if anio_primera_linea and not re.search(r"\b(19\d{2}|20\d{2})\b", titulo):
+        titulo = f"{titulo} {anio_primera_linea.group(1)}"
     # Si el año viene en una línea aparte, incorporarlo al título.
     if not re.search(r"\b\d{4}\b", titulo):
         anio_en_lineas = next(
@@ -2068,15 +2072,22 @@ async def menu_eliminar_contenido(update: Update, context: ContextTypes.DEFAULT_
             else:
                 # Para películas, compara el título completo ignorando el año
                 # y signos de puntuación, pero nunca fragmentos internos.
+                anio_consulta = re.search(r"\b(?:19|20)\d{2}\b", consulta)
+                anio_titulo = re.search(r"\b(?:19|20)\d{2}\b", titulo_fila)
                 titulo_sin_anio = re.sub(r"\b(?:19|20)\d{2}\b", "", titulo_fila)
                 titulo_normalizado = normalizar_busqueda(titulo_sin_anio)
                 titulo_exactamente = re.sub(r"[^a-z0-9]", "", titulo_normalizado)
-                # Aceptar el título completo o una búsqueda formada por sus
-                # primeras palabras completas, para encontrar títulos con subtítulo.
-                palabras_consulta = consulta.split()
+                # Si se indica año, también debe coincidir. El nombre puede ser
+                # completo o sus primeras palabras completas (sin fragmentos).
+                consulta_sin_anio = re.sub(r"\b(?:19|20)\d{2}\b", "", consulta).strip()
+                palabras_consulta = consulta_sin_anio.split()
                 palabras_titulo = titulo_normalizado.split()
-                coincide = bool(consulta_exacta) and (
-                    consulta_exacta == titulo_exactamente
+                coincide_anio = not anio_consulta or (
+                    anio_titulo and anio_consulta.group(0) == anio_titulo.group(0)
+                )
+                consulta_titulo_exacta = re.sub(r"[^a-z0-9]", "", consulta_sin_anio)
+                coincide = bool(consulta_titulo_exacta) and coincide_anio and (
+                    consulta_titulo_exacta == titulo_exactamente
                     or (
                         len(palabras_consulta) <= len(palabras_titulo)
                         and palabras_titulo[:len(palabras_consulta)] == palabras_consulta
