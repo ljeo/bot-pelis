@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 SUPER_ADMIN_ID = 6709726108  
 
@@ -3072,6 +3074,127 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error en comando /pedir: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu petición.")
 
+async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Asistente conversacional opcional; no modifica datos ni comandos existentes."""
+    if not update.message or not update.effective_user:
+        return
+
+    if not GEMINI_API_KEY:
+        await update.message.reply_text(
+            "🤖 El asistente todavía no está configurado. El administrador debe añadir GEMINI_API_KEY en Render."
+        )
+        return
+
+    pregunta = " ".join(context.args).strip()
+    if not pregunta:
+        await update.message.reply_text(
+            "🤖 ¡Hola! Soy el asistente de bot-pelis.\n\n"
+            "Escríbeme tu pregunta después del comando.\n"
+            "Ejemplo: /ia Recomiéndame películas de ciencia ficción.\n\n"
+            "Puedes seguir conversando usando /ia en cada mensaje. Usa /finia para borrar la conversación."
+        )
+        return
+    if len(pregunta) > 1000:
+        await update.message.reply_text("⚠️ La pregunta es demasiado larga. Usa un máximo de 1000 caracteres.")
+        return
+
+    user_key = f"ia_{update.effective_user.id}"
+    estado = context.application.bot_data.setdefault("ia_uso_diario", {})
+    hoy = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date().isoformat()
+    registro = estado.get(user_key, {"fecha": hoy, "cantidad": 0})
+    if registro.get("fecha") != hoy:
+        registro = {"fecha": hoy, "cantidad": 0}
+    if registro["cantidad"] >= 10:
+        await update.message.reply_text(
+            "⏳ Has alcanzado el límite diario de 10 consultas gratuitas. Inténtalo mañana."
+        )
+        return
+
+    await update.message.chat.send_action("typing")
+    try:
+        # El catálogo se consulta en modo lectura; no se crean ni modifican registros.
+        catalogo = []
+        try:
+            resultado_catalogo = await ejecutar_turso_sql([
+                "SELECT titulo, temporada FROM peliculas ORDER BY id DESC LIMIT 60"
+            ])
+            filas = resultado_catalogo.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            vistos = set()
+            for fila in filas:
+                titulo = str(fila[0].get("value", "")) if len(fila) > 0 else ""
+                temporada = str(fila[1].get("value", "General")) if len(fila) > 1 else "General"
+                clave = (titulo.casefold(), temporada.casefold())
+                if titulo and clave not in vistos:
+                    vistos.add(clave)
+                    catalogo.append(f"- {titulo} ({temporada})")
+        except Exception as error_catalogo:
+            logger.warning("No se pudo cargar el catálogo para el asistente: %s", error_catalogo)
+
+        historial = context.user_data.get("ia_historial", [])
+        historial = historial[-8:]
+        contenidos = list(historial)
+        contenidos.append({"role": "user", "parts": [{"text": pregunta}]})
+        instruccion = (
+            "Eres el asistente amable de bot-pelis. Responde en el idioma del usuario, "
+            "principalmente español o inglés. Ayuda con conversación general y cine/series. "
+            "Recomienda títulos con una breve explicación. No inventes que un contenido está "
+            "disponible en el bot: usa exclusivamente el catálogo adjunto para confirmar disponibilidad. "
+            "Si no aparece en el catálogo, dilo claramente. No afirmes tener acceso a internet en tiempo real. "
+            "No solicites contraseñas, tokens ni datos sensibles. Mantén las respuestas concisas.\n\n"
+            "CATÁLOGO ACTUAL (muestra de hasta 60 registros recientes; puede no ser completo):\n"
+            + ("\n".join(catalogo) if catalogo else "No se pudo obtener el catálogo.")
+        )
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            respuesta_api = await client.post(
+                url,
+                headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
+                json={
+                    "system_instruction": {"parts": [{"text": instruccion}]},
+                    "contents": contenidos,
+                    "generationConfig": {"maxOutputTokens": 700, "temperature": 0.7}
+                }
+            )
+        if respuesta_api.status_code != 200:
+            logger.error("Gemini devolvió HTTP %s: %s", respuesta_api.status_code, respuesta_api.text[:500])
+            if respuesta_api.status_code in (429, 503):
+                await update.message.reply_text("⏳ El servicio de IA está ocupado o alcanzó su cuota. Inténtalo más tarde.")
+            elif respuesta_api.status_code in (401, 403):
+                await update.message.reply_text("⚠️ La clave de Gemini no es válida o no tiene acceso a la API. Avísale al administrador.")
+            else:
+                await update.message.reply_text("⚠️ No pude obtener una respuesta de la IA. Inténtalo de nuevo más tarde.")
+            return
+
+        datos = respuesta_api.json()
+        partes = datos.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        respuesta_texto = "\n".join(
+            parte.get("text", "") for parte in partes
+            if isinstance(parte, dict) and parte.get("text") and not parte.get("thought", False)
+        ).strip()
+        if not respuesta_texto:
+            await update.message.reply_text("⚠️ La IA no pudo generar una respuesta. Prueba con otra pregunta.")
+            return
+
+        context.user_data["ia_historial"] = (
+            contenidos + [{"role": "model", "parts": [{"text": respuesta_texto}]}]
+        )[-10:]
+        registro["cantidad"] += 1
+        estado[user_key] = registro
+        await update.message.reply_text(respuesta_texto[:3900])
+    except httpx.TimeoutException:
+        await update.message.reply_text("⏳ La IA está tardando demasiado. Inténtalo otra vez.")
+    except Exception as error:
+        logger.error("Error en el asistente IA: %s", error, exc_info=True)
+        await update.message.reply_text("❌ Ocurrió un error al consultar el asistente.")
+
+
+async def finalizar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    context.user_data.pop("ia_historial", None)
+    await update.message.reply_text("🧹 Conversación con la IA borrada. Puedes empezar otra con /ia.")
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Excepción global capturada:", exc_info=context.error)
 
@@ -3079,6 +3202,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def post_init(application) -> None:
     comandos = [
         BotCommand("start", "Inicia el bot / Menú principal"),
+        BotCommand("ia", "Habla con el asistente de inteligencia artificial"),
+        BotCommand("finia", "Borra la conversación con la IA"),
         BotCommand("buscar", "Busca películas, series o animes"),
         BotCommand("pedir", "Solicita o verifica una película o serie"),
         BotCommand("guardar", "Guarda un video (responde a un archivo)"),
@@ -3106,6 +3231,8 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, detectar_bot_agregado))
     application.add_handler(MessageHandler(filters.StatusUpdate.PINNED_MESSAGE, eliminar_aviso_fijado_bienvenida))
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ia", comando_ia))
+    application.add_handler(CommandHandler("finia", finalizar_ia))
     application.add_handler(CommandHandler("idioma", configurar_idioma))
     application.add_handler(CommandHandler("guardar", guardar_pelicula))
     application.add_handler(CommandHandler("buscar", buscar_pelicula))
