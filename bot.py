@@ -3248,10 +3248,11 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     chat = update.effective_chat
     if chat and chat.type in ("group", "supergroup"):
-        # En grupos con temas, la activación pertenece únicamente al tema actual.
-        tema_id = str(update.message.message_thread_id or "general")
-        temas_activos = context.chat_data.setdefault("ia_temas_activos", {})
-        temas_activos[tema_id] = True
+        # Guardar la activación por chat y tema: no depende de user_data ni mezcla temas.
+        tema_id = update.message.message_thread_id
+        clave_tema = f"{chat.id}:{tema_id if tema_id is not None else 'general'}"
+        context.application.bot_data.setdefault("ia_temas_activos", set()).add(clave_tema)
+        logger.info("IA activada: chat=%s tema=%s", chat.id, tema_id)
     else:
         context.user_data["ia_activa"] = True
     pregunta = " ".join(context.args or []).strip() or context.user_data.pop("ia_pregunta_pendiente", "").strip()
@@ -3583,33 +3584,41 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def responder_texto_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Responde solo en el tema donde se activó la IA; en privado conserva el comportamiento anterior."""
-    if not update.message or not update.effective_user:
-        return
+    """Procesa texto normal solo si la IA está activa en este chat y tema."""
+    mensaje = update.effective_message
     chat = update.effective_chat
-    if chat and chat.type in ("group", "supergroup"):
-        tema_id = str(update.message.message_thread_id or "general")
-        if not context.chat_data.get("ia_temas_activos", {}).get(tema_id, False):
+    if not mensaje or not mensaje.text or not update.effective_user or not chat:
+        return
+
+    if chat.type in ("group", "supergroup"):
+        tema_id = mensaje.message_thread_id
+        clave_tema = f"{chat.id}:{tema_id if tema_id is not None else 'general'}"
+        temas_activos = context.application.bot_data.setdefault("ia_temas_activos", set())
+        if clave_tema not in temas_activos:
             return
+        logger.info("Texto IA recibido: chat=%s tema=%s usuario=%s", chat.id, tema_id, update.effective_user.id)
     elif not context.user_data.get("ia_activa", False):
         return
-    context.user_data["ia_pregunta_pendiente"] = update.message.text or ""
+
+    context.user_data["ia_pregunta_pendiente"] = mensaje.text
     await comando_ia(update, context)
 
 
 async def finalizar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message:
-        return
+    mensaje = update.effective_message
     chat = update.effective_chat
+    if not mensaje:
+        return
     if chat and chat.type in ("group", "supergroup"):
-        tema_id = str(update.message.message_thread_id or "general")
-        temas_activos = context.chat_data.setdefault("ia_temas_activos", {})
-        temas_activos.pop(tema_id, None)
+        tema_id = mensaje.message_thread_id
+        clave_tema = f"{chat.id}:{tema_id if tema_id is not None else 'general'}"
+        context.application.bot_data.setdefault("ia_temas_activos", set()).discard(clave_tema)
+        logger.info("IA desactivada: chat=%s tema=%s", chat.id, tema_id)
     else:
         context.user_data["ia_activa"] = False
         context.user_data.pop("ia_historial", None)
     context.user_data.pop("ia_pregunta_pendiente", None)
-    await update.message.reply_text("🧹 IA desactivada en este tema y conversación borrada. Puedes volver a activarla con /ia.")
+    await mensaje.reply_text("🧹 IA desactivada en este tema y conversación borrada. Puedes volver a activarla con /ia.")
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
