@@ -3246,8 +3246,14 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    context.chat_data["ia_activa"] = True
-    context.user_data["ia_activa"] = True
+    chat = update.effective_chat
+    if chat and chat.type in ("group", "supergroup"):
+        # En grupos con temas, la activación pertenece únicamente al tema actual.
+        tema_id = str(update.message.message_thread_id or "general")
+        temas_activos = context.chat_data.setdefault("ia_temas_activos", {})
+        temas_activos[tema_id] = True
+    else:
+        context.user_data["ia_activa"] = True
     pregunta = " ".join(context.args or []).strip() or context.user_data.pop("ia_pregunta_pendiente", "").strip()
     if not pregunta:
         await update.message.reply_text(
@@ -3577,10 +3583,15 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def responder_texto_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Envía a Gemini los mensajes normales mientras la IA esté activada para este usuario."""
+    """Responde solo en el tema donde se activó la IA; en privado conserva el comportamiento anterior."""
     if not update.message or not update.effective_user:
         return
-    if not (context.chat_data.get("ia_activa", False) or context.user_data.get("ia_activa", False)):
+    chat = update.effective_chat
+    if chat and chat.type in ("group", "supergroup"):
+        tema_id = str(update.message.message_thread_id or "general")
+        if not context.chat_data.get("ia_temas_activos", {}).get(tema_id, False):
+            return
+    elif not context.user_data.get("ia_activa", False):
         return
     context.user_data["ia_pregunta_pendiente"] = update.message.text or ""
     await comando_ia(update, context)
@@ -3589,11 +3600,16 @@ async def responder_texto_ia(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def finalizar_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
-    context.chat_data["ia_activa"] = False
-    context.user_data["ia_activa"] = False
+    chat = update.effective_chat
+    if chat and chat.type in ("group", "supergroup"):
+        tema_id = str(update.message.message_thread_id or "general")
+        temas_activos = context.chat_data.setdefault("ia_temas_activos", {})
+        temas_activos.pop(tema_id, None)
+    else:
+        context.user_data["ia_activa"] = False
+        context.user_data.pop("ia_historial", None)
     context.user_data.pop("ia_pregunta_pendiente", None)
-    context.user_data.pop("ia_historial", None)
-    await update.message.reply_text("🧹 IA desactivada y conversación borrada. Puedes volver a activarla con /ia.")
+    await update.message.reply_text("🧹 IA desactivada en este tema y conversación borrada. Puedes volver a activarla con /ia.")
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
