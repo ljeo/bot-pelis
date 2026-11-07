@@ -3219,15 +3219,21 @@ async def registrar_peticion_desde_ia(update: Update, context: ContextTypes.DEFA
 async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    peticion = context.user_data.get("ia_peticion_pendiente")
-    if not peticion or str(peticion.get("chat_id")) != str(query.message.chat_id):
-        await editar_o_enviar(query, "⚠️ Esta confirmación ya no está disponible. Vuelve a pedirle a Gemini que registre la solicitud.")
+    confirmaciones = context.application.bot_data.setdefault("ia_peticion_confirmaciones", {})
+    clave_confirmacion = f"{query.message.chat_id}:{query.message.message_id}"
+    peticion = confirmaciones.get(clave_confirmacion)
+    if (
+        not peticion
+        or str(peticion.get("chat_id")) != str(query.message.chat_id)
+        or str(peticion.get("user_id")) != str(update.effective_user.id)
+    ):
+        await editar_o_enviar(query, "⚠️ Esta confirmación ya no está disponible. Vuelve a escribir «pedir» para comprobar el catálogo.")
         return
     if query.data == "ia_req_no":
-        context.user_data.pop("ia_peticion_pendiente", None)
+        confirmaciones.pop(clave_confirmacion, None)
         await editar_o_enviar(query, "De acuerdo, no he registrado ninguna petición.")
         return
-    context.user_data.pop("ia_peticion_pendiente", None)
+    confirmaciones.pop(clave_confirmacion, None)
     try:
         await editar_o_enviar(query, "⏳ Registrando tu petición...")
         await registrar_peticion_desde_ia(update, context, peticion)
@@ -3348,13 +3354,20 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # Flujo directo de petición: primero pide el título y después comprueba
     # el catálogo real antes de ofrecer registrar la solicitud.
     pregunta_peticion = normalizar_busqueda(pregunta)
-    if re.fullmatch(r"(?:quiero|quisiera|me gustaria) (?:hacer una )?peticion(?: de)?|(?:quiero|quisiera) pedir|quiero solicitar", pregunta_peticion):
+    solicitud_sin_titulo = bool(re.fullmatch(
+        r"(?:pedir|quiero pedir|quisiera pedir|solicitar|quiero solicitar|"
+        r"quiero hacer una peticion|quisiera hacer una peticion|me gustaria hacer una peticion)",
+        pregunta_peticion
+    ))
+    if solicitud_sin_titulo:
         context.user_data["ia_esperando_titulo_peticion"] = True
         await update.message.reply_text("📩 ¡Claro! Dime el nombre de la película o serie y revisaré si ya está en el catálogo.")
         return
 
-    if context.user_data.pop("ia_esperando_titulo_peticion", False):
-        titulo_pedido = pregunta.strip()
+    pedido_directo = re.match(r"^(?:quiero|quisiera)?\\s*(?:pedir|solicitar)\\s+(.+)$", pregunta, re.IGNORECASE)
+    esperando_titulo = context.user_data.pop("ia_esperando_titulo_peticion", False)
+    if esperando_titulo or pedido_directo:
+        titulo_pedido = pedido_directo.group(1).strip() if pedido_directo else pregunta.strip()
         titulo_pedido = re.sub(r"^(?:la pelicula|pelicula|la serie|serie|anime)\\s+", "", titulo_pedido, flags=re.IGNORECASE).strip()
         if not titulo_pedido:
             context.user_data["ia_esperando_titulo_peticion"] = True
@@ -3400,10 +3413,15 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     InlineKeyboardButton("📩 Sí, quiero pedirla", callback_data="ia_req_yes"),
                     InlineKeyboardButton("❌ Cancelar", callback_data="ia_req_no")
                 ]])
-                await update.message.reply_text(
+                mensaje_confirmacion = await update.message.reply_text(
                     f"🔎 No encuentro «{titulo_pedido}» en el catálogo. ¿Quieres que envíe una petición al administrador?",
                     reply_markup=teclado_peticion
                 )
+                confirmaciones = context.application.bot_data.setdefault("ia_peticion_confirmaciones", {})
+                confirmaciones[f"{update.effective_chat.id}:{mensaje_confirmacion.message_id}"] = {
+                    "titulo": titulo_pedido, "temporada": "General",
+                    "chat_id": update.effective_chat.id, "user_id": update.effective_user.id
+                }
         except Exception as error_busqueda:
             logger.error("Error comprobando el catálogo para una petición IA: %s", error_busqueda, exc_info=True)
             await update.message.reply_text("⚠️ No pude consultar el catálogo ahora mismo. Inténtalo de nuevo.")
@@ -3707,20 +3725,6 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                             callback_data=f"seriestemp_id_{id_registro}"
                         )])
 
-        candidato = extraer_candidato_peticion_ia(pregunta, respuesta_texto)
-        if candidato:
-            if candidato.get("falta_temporada"):
-                context.user_data["ia_peticion_falta_temporada"] = candidato["titulo"]
-                respuesta_texto += f"\n\n📺 Para registrar *{candidato['titulo']}*, ¿qué temporada quieres pedir?"
-            else:
-                context.user_data["ia_peticion_pendiente"] = {
-                    "titulo": candidato["titulo"], "temporada": candidato["temporada"],
-                    "chat_id": update.effective_chat.id
-                }
-                keyboard_ia.append([
-                    InlineKeyboardButton("✅ Sí, registrar petición", callback_data="ia_req_yes"),
-                    InlineKeyboardButton("❌ Cancelar", callback_data="ia_req_no")
-                ])
         await update.message.reply_text(
             respuesta_texto[:3500],
             reply_markup=InlineKeyboardMarkup(keyboard_ia) if keyboard_ia else None
