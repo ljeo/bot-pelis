@@ -3256,10 +3256,10 @@ async def buscar_datos_tmdb(pregunta: str) -> str:
 
     consulta = pregunta
     patrones = [
-        r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada|de que trata|de que va|sinopsis de|argumento de|trama de|sobre que trata)\\s+",
-        r"^(?:what year was|when was|release date of|release year of|what is .* about|plot of|synopsis of)\\s+",
-        r"\\s+(?:se estreno|salio|fue estrenada|fue lanzada|de que trata|de que va)\\??$",
-        r"\\s+(?:en que ano|que ano|fecha de estreno|release date|release year|sinopsis|argumento)\\??$"
+        r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada|de que trata|de que va|sinopsis de|argumento de|trama de|sobre que trata)\s+",
+        r"^(?:what year was|when was|release date of|release year of|what is .* about|plot of|synopsis of)\s+",
+        r"\s+(?:se estreno|salio|fue estrenada|fue lanzada|de que trata|de que va)\??$",
+        r"\s+(?:en que ano|que ano|fecha de estreno|release date|release year|sinopsis|argumento)\??$"
     ]
     for patron in patrones:
         consulta = re.sub(patron, "", consulta, flags=re.IGNORECASE).strip()
