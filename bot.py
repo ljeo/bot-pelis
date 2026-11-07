@@ -3364,11 +3364,11 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("📩 ¡Claro! Dime el nombre de la película o serie y revisaré si ya está en el catálogo.")
         return
 
-    pedido_directo = re.match(r"^(?:quiero|quisiera)?\\s*(?:pedir|solicitar)\\s+(.+)$", pregunta, re.IGNORECASE)
+    pedido_directo = re.match(r"^(?:quiero|quisiera)?\s*(?:pedir|solicitar)\s+(.+)$", pregunta, re.IGNORECASE)
     esperando_titulo = context.user_data.pop("ia_esperando_titulo_peticion", False)
     if esperando_titulo or pedido_directo:
         titulo_pedido = pedido_directo.group(1).strip() if pedido_directo else pregunta.strip()
-        titulo_pedido = re.sub(r"^(?:la pelicula|pelicula|la serie|serie|anime)\\s+", "", titulo_pedido, flags=re.IGNORECASE).strip()
+        titulo_pedido = re.sub(r"^(?:la pelicula|pelicula|la serie|serie|anime)\s+", "", titulo_pedido, flags=re.IGNORECASE).strip()
         if not titulo_pedido:
             context.user_data["ia_esperando_titulo_peticion"] = True
             await update.message.reply_text("Dime el nombre de la película o serie que quieres pedir.")
