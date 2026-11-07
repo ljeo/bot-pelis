@@ -3351,6 +3351,16 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⚠️ La pregunta es demasiado larga. Usa un máximo de 1000 caracteres.")
         return
 
+    # Responder saludos comunes directamente, sin consultar los servicios de IA.
+    saludo = normalizar_busqueda(pregunta)
+    if re.fullmatch(
+        r"(?:hola|holi|hey|buenas|buenos dias|buenas tardes|buenas noches|"
+        r"que tal|como estas|hola bot|hola bot pelis|buenas bot)",
+        saludo
+    ):
+        await update.message.reply_text("¡Hola! 👋 ¿Qué película o serie te gustaría ver?")
+        return
+
     # Flujo directo de petición: primero pide el título y después comprueba
     # el catálogo real antes de ofrecer registrar la solicitud.
     pregunta_peticion = normalizar_busqueda(pregunta)
