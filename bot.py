@@ -3727,7 +3727,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             pregunta_norm_sinopsis
         ))
         es_pregunta_fecha = bool(re.search(
-            r"\\b(?:ano|fecha|estreno|estren[oó]|lanzamiento|cuando salio|cuando se estreno|release date|release year|when did|premiere|fecha de lanzamiento)\\b",
+            r"\b(?:ano|fecha|estreno|estren[oó]|lanzamiento|cuando salio|cuando se estreno|release date|release year|when did|premiere|fecha de lanzamiento)\b",
             pregunta_norm_sinopsis
         ))
         if es_pregunta_fecha and datos_tmdb:
