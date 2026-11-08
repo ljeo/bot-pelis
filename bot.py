@@ -262,6 +262,14 @@ async def init_db() -> None:
         await ejecutar_turso_sql(["ALTER TABLE solicitudes ADD COLUMN admin_mensaje_id INTEGER"])
     except Exception as e:
         logger.info(f"Campo admin_mensaje_id ya disponible: {e}")
+    try:
+        await ejecutar_turso_sql(["ALTER TABLE solicitudes ADD COLUMN origen_mensaje_id INTEGER"])
+    except Exception as e:
+        logger.info(f"Campo origen_mensaje_id ya disponible: {e}")
+    try:
+        await ejecutar_turso_sql(["ALTER TABLE confirmaciones_peticion_ia ADD COLUMN origen_mensaje_id INTEGER"])
+    except Exception as e:
+        logger.info(f"Campo origen_mensaje_id en confirmaciones IA ya disponible: {e}")
 
     try:
         await ejecutar_turso_sql([f"INSERT OR IGNORE INTO admins (user_id) VALUES ('{SUPER_ADMIN_ID}')"])
@@ -2011,15 +2019,10 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
     # Leemos las solicitudes pendientes y comparamos en Python para tolerar
     # diferencias de mayúsculas, signos, año y formato de temporada/episodio.
     resultado = await ejecutar_turso_sql([
-        "SELECT id, chat_id, user_id, titulo, temporada, mensaje_id, admin_mensaje_id FROM solicitudes"
+        "SELECT id, chat_id, user_id, titulo, temporada, mensaje_id, admin_mensaje_id, origen_mensaje_id FROM solicitudes"
     ])
     results = resultado.get("results", [])
     rows = results[0].get("response", {}).get("result", {}).get("rows", []) if results else []
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎬 Ver catálogo de películas", callback_data="cat_peliculas"),
-        InlineKeyboardButton("📺 Ver catálogo de series", callback_data="cat_series")
-    ]])
-
     for row in rows:
         solicitud_id = int(row[0]["value"])
         chat_id = int(row[1]["value"])
@@ -2028,15 +2031,39 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
         temporada_solicitada = str(row[4].get("value", "General"))
         mensaje_id_valor = row[5].get("value") if len(row) > 5 else None
         admin_mensaje_id_valor = row[6].get("value") if len(row) > 6 else None
+        origen_mensaje_id_valor = row[7].get("value") if len(row) > 7 else None
         if not coincide_titulo_solicitud(titulo_solicitado, titulo_base):
             continue
         if temporada_solicitada.strip().lower() != temporada_objetivo:
             continue
         try:
+            temporada_sql = temporada_guardada.replace("'", "''")
+            res_contenido = await ejecutar_turso_sql([
+                "SELECT id, titulo FROM peliculas "
+                f"WHERE temporada = '{temporada_sql}' ORDER BY id DESC"
+            ])
+            filas_contenido = res_contenido.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            registro_id = None
+            titulo_registro = titulo_base
+            for fila_contenido in filas_contenido:
+                if len(fila_contenido) < 2:
+                    continue
+                titulo_candidato = str(fila_contenido[1].get("value", ""))
+                if coincide_titulo_solicitud(titulo_base, titulo_candidato):
+                    registro_id = str(fila_contenido[0].get("value", ""))
+                    titulo_registro = titulo_candidato
+                    break
+            if not registro_id:
+                logger.warning("No se encontró el registro concreto para enlazar la petición resuelta: %s - %s", titulo_base, temporada_guardada)
+                continue
+            etiqueta = f"📺 Ver: {titulo_registro} - {temporada_guardada}" if temporada_guardada != "General" else f"🎬 Ver: {titulo_registro}"
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(etiqueta[:64], callback_data=f"seltemp_id_{registro_id}_{temporada_guardada}")
+            ]])
             texto_notificacion = (
-                f"🎉 ¡Tu petición ha sido agregada al catálogo!\n\n"
-                f"📺 Contenido: <b>{escape(titulo_solicitado)}</b>\n\n"
-                "Abre el catálogo actualizado para encontrarlo."
+                f"🎉 ¡Tu petición ha sido agregada al catálogo!\\n\\n"
+                f"📺 Contenido: <b>{escape(titulo_solicitado)}</b>\\n\\n"
+                "Pulsa el botón para abrir directamente el contenido."
             )
             # Para solicitudes hechas en grupos, se intenta el DM sin perder
             # el aviso original del grupo. En privado solo se envía una vez.
@@ -2064,6 +2091,11 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
                     await context.bot.delete_message(chat_id=chat_id, message_id=int(mensaje_id_valor))
                 except Exception as e_delete:
                     logger.warning(f"No se pudo borrar el mensaje de petición: {e_delete}")
+            if origen_mensaje_id_valor not in (None, "", "null"):
+                try:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=int(origen_mensaje_id_valor))
+                except Exception as e_delete_origen:
+                    logger.warning(f"No se pudo borrar el mensaje original de la petición: {e_delete_origen}")
             if admin_mensaje_id_valor not in (None, "", "null"):
                 try:
                     await context.bot.delete_message(chat_id=SUPER_ADMIN_ID, message_id=int(admin_mensaje_id_valor))
@@ -3132,7 +3164,7 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if filas_solicitud:
                     id_solicitud = int(filas_solicitud[0][0]["value"])
                     admin_id_sql = str(int(mensaje_admin_id)) if mensaje_admin_id is not None else "NULL"
-                    await ejecutar_turso_sql([f"UPDATE solicitudes SET mensaje_id = {mensaje_peticion.message_id}, admin_mensaje_id = {admin_id_sql} WHERE id = {id_solicitud}"])
+                    await ejecutar_turso_sql([f"UPDATE solicitudes SET mensaje_id = {mensaje_peticion.message_id}, admin_mensaje_id = {admin_id_sql}, origen_mensaje_id = {update.message.message_id} WHERE id = {id_solicitud}"])
             except Exception as e_msg:
                 logger.error(f"No se pudo guardar el ID del aviso: {e_msg}", exc_info=True)
 
@@ -3176,7 +3208,7 @@ def extraer_candidato_peticion_ia(pregunta: str, respuesta: str = ""):
     return {"titulo": texto, "temporada": temporada, "falta_temporada": False}
 
 
-async def registrar_peticion_desde_ia(update: Update, context: ContextTypes.DEFAULT_TYPE, peticion: dict, mensaje_origen=None) -> None:
+async def registrar_peticion_desde_ia(update: Update, context: ContextTypes.DEFAULT_TYPE, peticion: dict, mensaje_origen=None, origen_mensaje_id=None) -> None:
     user, chat = update.effective_user, update.effective_chat
     if not user or not chat:
         return
@@ -3221,9 +3253,11 @@ async def registrar_peticion_desde_ia(update: Update, context: ContextTypes.DEFA
         if filas:
             sid = int(filas[0][0]["value"])
             admin_id_sql = str(int(admin_mensaje_id)) if admin_mensaje_id is not None else "NULL"
+            origen_id_sql = str(int(origen_mensaje_id)) if origen_mensaje_id is not None else "NULL"
             await ejecutar_turso_sql([
                 "UPDATE solicitudes SET "
-                f"mensaje_id = {mensaje_usuario.message_id}, admin_mensaje_id = {admin_id_sql} WHERE id = {sid}"
+                f"mensaje_id = {mensaje_usuario.message_id}, admin_mensaje_id = {admin_id_sql}, "
+                f"origen_mensaje_id = {origen_id_sql} WHERE id = {sid}"
             ])
     except Exception as error_ids:
         logger.error("No se pudieron guardar los IDs de avisos de petición IA: %s", error_ids, exc_info=True)
@@ -3242,7 +3276,7 @@ async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYP
     user_sql = str(update.effective_user.id).replace("'", "''")
     try:
         resultado = await ejecutar_turso_sql([
-            "SELECT chat_id, user_id, titulo, temporada FROM confirmaciones_peticion_ia "
+            "SELECT chat_id, user_id, titulo, temporada, origen_mensaje_id FROM confirmaciones_peticion_ia "
             f"WHERE id = '{confirmacion_id}' LIMIT 1"
         ])
         filas = resultado.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
@@ -3262,7 +3296,8 @@ async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYP
             return
 
         await editar_o_enviar(query, "⏳ Registrando tu petición...")
-        await registrar_peticion_desde_ia(update, context, peticion)
+        origen_id = valores[4] if len(valores) > 4 and valores[4] not in ("", "None", "null") else None
+        await registrar_peticion_desde_ia(update, context, peticion, origen_mensaje_id=origen_id)
     except Exception as error:
         logger.error("Error registrando petición confirmada por Gemini: %s", error, exc_info=True)
         await context.bot.send_message(chat_id=query.message.chat_id, text="❌ No pude registrar la petición. Inténtalo de nuevo o utiliza /pedir.")
@@ -3494,8 +3529,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 confirmacion_id = secrets.token_hex(6)
                 titulo_sql = titulo_pedido.replace("'", "''")
                 await ejecutar_turso_sql([
-                    "INSERT INTO confirmaciones_peticion_ia (id, chat_id, user_id, titulo, temporada) "
-                    f"VALUES ('{confirmacion_id}', '{update.effective_chat.id}', '{update.effective_user.id}', '{titulo_sql}', 'General')"
+                    "INSERT INTO confirmaciones_peticion_ia (id, chat_id, user_id, titulo, temporada, origen_mensaje_id) "
+                    f"VALUES ('{confirmacion_id}', '{update.effective_chat.id}', '{update.effective_user.id}', '{titulo_sql}', 'General', {update.message.message_id})"
                 ])
                 teclado_peticion = InlineKeyboardMarkup([[
                     InlineKeyboardButton("📩 Sí, quiero pedirla", callback_data=f"ia_req_yes_{confirmacion_id}"),
@@ -3549,8 +3584,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             titulo_sql = falta_temp.replace("'", "''")
             temporada_confirmada = f"Temporada {int(numero)}"
             await ejecutar_turso_sql([
-                "INSERT INTO confirmaciones_peticion_ia (id, chat_id, user_id, titulo, temporada) "
-                f"VALUES ('{confirmacion_id}', '{update.effective_chat.id}', '{update.effective_user.id}', '{titulo_sql}', '{temporada_confirmada}')"
+                "INSERT INTO confirmaciones_peticion_ia (id, chat_id, user_id, titulo, temporada, origen_mensaje_id) "
+                f"VALUES ('{confirmacion_id}', '{update.effective_chat.id}', '{update.effective_user.id}', '{titulo_sql}', '{temporada_confirmada}', {update.message.message_id})"
             ])
             teclado = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Sí, registrar petición", callback_data=f"ia_req_yes_{confirmacion_id}"),
