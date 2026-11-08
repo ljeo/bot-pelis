@@ -3572,8 +3572,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     # Resolver Narnia 1, 2 o 3 contra los títulos reales del catálogo.
     consulta_narnia = normalizar_busqueda(pregunta)
-    numero_narnia = re.search(r"\\bnarnia\\s*([123])\\b", consulta_narnia)
-    if numero_narnia and re.search(r"\\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame)\\b", consulta_narnia):
+    numero_narnia = re.search(r"\bnarnia\\s*([123])\\b", consulta_narnia)
+    if numero_narnia and re.search(r"\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame)\\b", consulta_narnia):
         try:
             resultado_narnia = await ejecutar_turso_sql(["SELECT id, temporada, titulo FROM peliculas ORDER BY id DESC"])
             filas_narnia = resultado_narnia.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
@@ -3639,13 +3639,13 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Las peticiones simples se resuelven primero contra el catálogo para
         # evitar respuestas largas o en otro idioma generadas por la IA.
         consulta_directa = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(pregunta)).strip()
-        pide_directo = bool(re.search(r"\\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame|envia|mandame|pasame)\\b", consulta_directa))
+        pide_directo = bool(re.search(r"\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame|envia|mandame|pasame)\\b", consulta_directa))
         ruido_directo = {"quiero", "quisiera", "dame", "ver", "busco", "buscar", "ponme", "muestrame", "mostrar", "envia", "mandame", "pasame", "pelicula", "peliculas", "serie", "series", "por", "favor", "la", "el", "los", "las", "de", "del", "una", "un"}
         terminos_directos = [t for t in consulta_directa.split() if t not in ruido_directo]
         if pide_directo and terminos_directos:
             coincidencias_directas = []
             for id_registro, temporada, titulo_registro in registros_catalogo:
-                nombre_directo = extraer_nombre_base_serie(titulo_registro) if temporada != "General" else re.sub(r"\\s*\\([^)]*\\)", " ", titulo_registro).strip()
+                nombre_directo = extraer_nombre_base_serie(titulo_registro) if temporada != "General" else re.sub(r"\s*\\([^)]*\\)", " ", titulo_registro).strip()
                 nombre_norm = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(nombre_directo)).strip()
                 if nombre_norm and all(t in nombre_norm.split() for t in terminos_directos):
                     coincidencias_directas.append((id_registro, temporada, titulo_registro))
