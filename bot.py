@@ -3333,7 +3333,9 @@ async def callback_peticion_ia(update: Update, context: ContextTypes.DEFAULT_TYP
 
         valores = [str(campo.get("value", "")) for campo in filas[0]]
         peticion = {"chat_id": valores[0], "user_id": valores[1], "titulo": valores[2], "temporada": valores[3] or "General"}
-        if peticion["chat_id"] != chat_sql or peticion["user_id"] != user_sql:
+        if peticion["chat_id"] != chat_sql or (
+            query.message.chat.type == "private" and peticion["user_id"] != user_sql
+        ):
             await editar_o_enviar(query, "⚠️ Esta confirmación pertenece a otro usuario o chat.")
             return
 
