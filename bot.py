@@ -3171,12 +3171,13 @@ async def pedir_contenido(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             except Exception as e_msg:
                 logger.error(f"No se pudo guardar el ID del aviso: {e_msg}", exc_info=True)
 
-            # Borrar el comando original del usuario después de registrar la petición.
-            # En grupos, Telegram requiere que el bot tenga permiso para borrar mensajes.
-            try:
-                await update.message.delete()
-            except Exception as e_delete:
-                logger.warning(f"No se pudo borrar el mensaje original de /pedir: {e_delete}")
+            # Mantener el comando original en grupos hasta que la petición se cumpla.
+            # En privado se conserva el comportamiento anterior.
+            if update.effective_chat.type == "private":
+                try:
+                    await update.message.delete()
+                except Exception as e_delete:
+                    logger.warning(f"No se pudo borrar el mensaje original de /pedir en privado: {e_delete}")
     except Exception as e:
         logger.error(f"Error en comando /pedir: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error al procesar tu petición.")
@@ -3332,7 +3333,13 @@ async def buscar_datos_tmdb(pregunta: str) -> str:
     ]
     for patron in patrones:
         consulta = re.sub(patron, "", consulta, flags=re.IGNORECASE).strip()
-    consulta = re.sub(r"^[¿?¡!\s]+|[¿?¡!\s]+$", "", consulta).strip()
+    consulta = re.sub(
+        r"^(?:(?:la|el|una|un)\\s+)?(?:pelicula|serie|anime)\\s+",
+        "",
+        consulta,
+        flags=re.IGNORECASE
+    ).strip()
+    consulta = re.sub(r"^[¿?¡!\\s]+|[¿?¡!\\s]+$", "", consulta).strip()
     if len(consulta) < 2:
         return ""
 
@@ -3720,9 +3727,46 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             pregunta_norm_sinopsis
         ))
         es_pregunta_fecha = bool(re.search(
-            r"\b(?:ano|fecha|estreno|estren[oó]|lanzamiento|cuando salio|cuando se estreno|release date|release year|when did|premiere|fecha de lanzamiento)\b",
+            r"\\b(?:ano|fecha|estreno|estren[oó]|lanzamiento|cuando salio|cuando se estreno|release date|release year|when did|premiere|fecha de lanzamiento)\\b",
             pregunta_norm_sinopsis
         ))
+        if es_pregunta_fecha and datos_tmdb:
+            # Responder directamente desde TMDb solo cuando el título coincide exactamente.
+            titulo_consultado = pregunta
+            patrones_titulo = [
+                r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada)\\s+",
+                r"^(?:what year was|when was|release date of|release year of)\\s+",
+                r"\\s+(?:se estreno|salio|fue estrenada|fue lanzada)\\??$",
+                r"\\s+(?:en que ano|que ano|fecha de estreno|release date|release year)\\??$"
+            ]
+            for patron_titulo in patrones_titulo:
+                titulo_consultado = re.sub(patron_titulo, "", titulo_consultado, flags=re.IGNORECASE).strip()
+            titulo_consultado = re.sub(
+                r"^(?:(?:la|el|una|un)\\s+)?(?:pelicula|serie|anime)\\s+",
+                "",
+                titulo_consultado,
+                flags=re.IGNORECASE
+            ).strip(" ¿?¡!\\t\\n")
+            titulo_normalizado = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(titulo_consultado)).strip()
+            for linea_tmdb in datos_tmdb.splitlines():
+                campos_tmdb = dict(re.findall(r"(Título|Título original|Fecha de estreno|Año):\\s*([^;]+)", linea_tmdb))
+                titulos_tmdb = [
+                    re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(campos_tmdb.get(campo, ""))).strip()
+                    for campo in ("Título", "Título original")
+                ]
+                if titulo_normalizado and titulo_normalizado in titulos_tmdb:
+                    fecha_tmdb = campos_tmdb.get("Fecha de estreno", "").strip()
+                    anio_tmdb = campos_tmdb.get("Año", "").strip()
+                    if fecha_tmdb and fecha_tmdb.lower() != "no disponible":
+                        fecha_formateada = re.sub(r"^(\\d{4})-(\\d{2})-(\\d{2}).*$", r"\\3/\\2/\\1", fecha_tmdb)
+                        respuesta_fecha = (
+                            f"El año de estreno de {campos_tmdb.get('Título', titulo_consultado)} es {anio_tmdb}."
+                            if re.search(r"\\b(?:ano|year)\\b", pregunta_norm_sinopsis) and anio_tmdb != "no disponible"
+                            else f"La fecha de estreno de {campos_tmdb.get('Título', titulo_consultado)} es {fecha_formateada}."
+                        )
+                        await update.message.reply_text(respuesta_fecha)
+                        return
+                    break
         if es_pregunta_sinopsis:
             # Evita que el historial arrastre respuestas bilingües anteriores.
             contenidos = [{"role": "user", "parts": [{"text": pregunta}]}]
