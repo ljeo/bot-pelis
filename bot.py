@@ -639,6 +639,13 @@ def clave_serie_catalogo(titulo: str) -> str:
     return "".join(c.lower() for c in nombre if c.isalnum())
 
 
+def clave_pelicula_catalogo(titulo: str) -> str:
+    """Clave de película que ignora puntuación y acentos, pero conserva el año."""
+    texto = unicodedata.normalize("NFKD", str(titulo or "").casefold())
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return " ".join(re.findall(r"[a-z0-9]+", texto))
+
+
 def numero_temporada_catalogo(temporada: str, titulo: str = ""):
     """Obtiene el número de temporada; infiere el dato del marcador del episodio si falta."""
     coincidencia = re.search(r"temporada\s*(\d+)", temporada or "", re.IGNORECASE)
@@ -924,6 +931,22 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
             titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
             await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
             return
+
+        # Comparación normalizada adicional para películas: ignora puntos,
+        # guiones, paréntesis y acentos, pero exige conservar el mismo año.
+        if temporada == "General":
+            clave_pelicula_nueva = clave_pelicula_catalogo(titulo_guardar)
+            res_peliculas = await ejecutar_turso_sql([
+                "SELECT id, titulo FROM peliculas WHERE temporada = 'General'"
+            ])
+            filas_peliculas = res_peliculas.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            for fila_pelicula in filas_peliculas:
+                titulo_existente = str(fila_pelicula[1].get("value", "")) if len(fila_pelicula) > 1 else ""
+                if clave_pelicula_nueva and clave_pelicula_catalogo(titulo_existente) == clave_pelicula_nueva:
+                    logger.info("Película duplicada omitida por título/año normalizados: %s", titulo_guardar)
+                    titulo_para_notificar = re.sub(r"\s+\d{4}$", "", titulo_limpio).strip()
+                    await notificar_solicitudes_resueltas(titulo_para_notificar, temporada, context)
+                    return
 
         marcador_nuevo = re.search(r"\((\d{1,2})[xX](\d{1,2})\)\s*$", titulo_guardar)
         if marcador_nuevo:
@@ -3917,7 +3940,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             r"user|language|task|data\s+source)\s*:"
         )
         if es_pregunta_fecha and re.search(
-            r"(?is)analyze\s+the\s+request|analysis(?:\s+of\s+the\s+request)?|request\s+analysis|"
+            r"(?is)analy[sz]e\s+(?:the\s+)?(?:user['’]s\s+)?request|analysis(?:\s+of\s+the\s+request)?|request\s+analysis|"
             r"analiza\s+la\s+solicitud|análisis\s+de\s+la\s+solicitud",
             respuesta_texto
         ):
@@ -3947,7 +3970,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             if not respuesta_texto:
                 logger.warning("La IA devolvió análisis interno y TMDb no aportó sinopsis.")
         elif re.search(
-            r"(?is)^\s*(?:analyze the request|analysis of the request|request analysis|"
+            r"(?is)^\s*(?:analy[sz]e\s+(?:the\s+)?(?:user['’]s\s+)?request|analysis of the request|request analysis|"
             r"analiza la solicitud|análisis de la solicitud|user\s*:|language\s*:|"
             r"task\s*:|data source\s*:)",
             respuesta_texto
