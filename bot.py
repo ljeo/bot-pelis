@@ -356,7 +356,7 @@ async def enviar_bienvenida_grupo(chat_id: int, context: ContextTypes.DEFAULT_TY
 
         keyboard = [[
             InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
-            InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")
+            InlineKeyboardButton("📺 Serie", callback_data="cat_series")
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -582,7 +582,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         bot_info = await context.bot.get_me()
         keyboard = [
             [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
-             InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")],
+             InlineKeyboardButton("📺 Serie", callback_data="cat_series")],
             [InlineKeyboardButton(
                 "➕ Agrégame a tu grupo",
                 url=f"https://t.me/{bot_info.username}?startgroup=true"
@@ -841,7 +841,23 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Quitar el prefijo accidental "ve" y cualquier descriptor "temporada" residual.
         titulo_limpio = re.sub(r'^\s*ve\s+', '', titulo_limpio, flags=re.IGNORECASE).strip()
         titulo_limpio = re.sub(r'\s+temporada\s*$', '', titulo_limpio, flags=re.IGNORECASE).strip()
-        if not titulo_limpio or not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", titulo_limpio):
+
+        # Limpiar adornos y metadatos del canal solo para series.
+        # El marcador de episodio se conserva porque se extrae de raw_title más abajo.
+        texto_limpieza = re.sub(r"\([^)]*\)|\[[^]]*\]|\{[^}]*\}", " ", titulo_limpio)
+        texto_limpieza = re.sub(r"(?:^|\s)#\S+", " ", texto_limpieza)
+        texto_limpieza = re.sub(
+            r"\b(?:sub(?:s)?|subtitulos?|subtitulad[oa]s?|latino|latina|castellano|"
+            r"español|espanol|english|ingles|inglés|4k|8k|2160p|1440p|1080p|720p|"
+            r"480p|360p|web[- ]?dl|webrip|hdrip|bluray|blu[- ]?ray|x264|x265|hevc)\b.*$",
+            " ",
+            texto_limpieza,
+            flags=re.IGNORECASE
+        )
+        texto_limpieza = re.sub(r"\b(?:19|20)\d{2}\b", " ", texto_limpieza)
+        titulo_limpio = limpiar_titulo_pelicula(texto_limpieza) if texto_limpieza.strip() else ""
+
+        if not titulo_limpio or titulo_limpio == "Sin Título" or not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", titulo_limpio):
             logger.warning(
                 f"Capítulo omitido: no se detectó el nombre de la serie en el caption: {caption!r}"
             )
@@ -1160,24 +1176,28 @@ async def gestionar_envio_saga(update: Update, context: ContextTypes.DEFAULT_TYP
             saga_id = int(data[len("sagaenv_priv_"):])
         elif data.startswith("sagaenv_"):
             saga_id = int(data[len("sagaenv_"):])
-            sql_nombre = f"SELECT nombre FROM sagas WHERE id = {saga_id} AND (chat_id = '{chat_id}' OR (CAST('{chat_id}' AS INTEGER) < 0 AND CAST(chat_id AS INTEGER) > 0)) LIMIT 1"
-            res_nombre = await ejecutar_turso_sql([sql_nombre])
-            filas_nombre = res_nombre.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            if not filas_nombre:
-                await editar_o_enviar(query, "⚠️ Esta saga ya no está disponible.")
+            if query.message.chat.type == "private":
+                # En DM el destino ya es este chat: no mostrar opciones de grupo.
+                modo = "chat"
+            else:
+                sql_nombre = f"SELECT nombre FROM sagas WHERE id = {saga_id} AND (chat_id = '{chat_id}' OR (CAST('{chat_id}' AS INTEGER) < 0 AND CAST(chat_id AS INTEGER) > 0)) LIMIT 1"
+                res_nombre = await ejecutar_turso_sql([sql_nombre])
+                filas_nombre = res_nombre.get("results", [])[0]["response"].get("result", {}).get("rows", [])
+                if not filas_nombre:
+                    await editar_o_enviar(query, "⚠️ Esta saga ya no está disponible.")
+                    return
+                nombre_saga = str(filas_nombre[0][0].get("value", "Saga"))
+                keyboard = [[
+                    InlineKeyboardButton("💬 En este chat", callback_data=f"sagaenv_chat_{saga_id}"),
+                    InlineKeyboardButton("🔒 En mensaje privado", callback_data=f"sagaenv_priv_{saga_id}")
+                ]]
+                await editar_o_enviar(
+                    query,
+                    f"📍 ¿Dónde prefieres recibir la saga *{nombre_saga}* completa?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
                 return
-            nombre_saga = str(filas_nombre[0][0].get("value", "Saga"))
-            keyboard = [[
-                InlineKeyboardButton("💬 En este chat", callback_data=f"sagaenv_chat_{saga_id}"),
-                InlineKeyboardButton("🔒 En mensaje privado", callback_data=f"sagaenv_priv_{saga_id}")
-            ]]
-            await editar_o_enviar(
-                query,
-                f"📍 ¿Dónde prefieres recibir la saga *{nombre_saga}* completa?",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="Markdown"
-            )
-            return
         else:
             return
 
@@ -1426,7 +1446,7 @@ async def catalogo_volver_inicio(update: Update, context: ContextTypes.DEFAULT_T
 
     keyboard = [
         [InlineKeyboardButton("🎬 Películas", callback_data="cat_peliculas"),
-         InlineKeyboardButton("📺 Series y Animes", callback_data="cat_series")]
+         InlineKeyboardButton("📺 Serie", callback_data="cat_series")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
