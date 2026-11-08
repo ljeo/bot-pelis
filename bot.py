@@ -1018,7 +1018,8 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
                 "FROM sagas s "
                 "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
                 "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-                f"WHERE s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id "
+                f"WHERE (s.chat_id = '{chat_id}' OR (CAST('{chat_id}' AS INTEGER) < 0 AND CAST(s.chat_id AS INTEGER) > 0)) "
+                "AND p.chat_id = s.chat_id "
                 "ORDER BY s.nombre, p.titulo"
             )
             res_sagas = await ejecutar_turso_sql([sql_sagas])
@@ -1101,7 +1102,8 @@ async def mostrar_peliculas_saga(update: Update, context: ContextTypes.DEFAULT_T
             "FROM sagas s "
             "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
             "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-            f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id"
+            f"WHERE s.id = {saga_id} AND (s.chat_id = '{chat_id}' OR (CAST('{chat_id}' AS INTEGER) < 0 AND CAST(s.chat_id AS INTEGER) > 0)) "
+            "AND p.chat_id = s.chat_id"
         )
         resultado = await ejecutar_turso_sql([sql])
         filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
@@ -1158,7 +1160,7 @@ async def gestionar_envio_saga(update: Update, context: ContextTypes.DEFAULT_TYP
             saga_id = int(data[len("sagaenv_priv_"):])
         elif data.startswith("sagaenv_"):
             saga_id = int(data[len("sagaenv_"):])
-            sql_nombre = f"SELECT nombre FROM sagas WHERE id = {saga_id} AND chat_id = '{chat_id}' LIMIT 1"
+            sql_nombre = f"SELECT nombre FROM sagas WHERE id = {saga_id} AND (chat_id = '{chat_id}' OR (CAST('{chat_id}' AS INTEGER) < 0 AND CAST(chat_id AS INTEGER) > 0)) LIMIT 1"
             res_nombre = await ejecutar_turso_sql([sql_nombre])
             filas_nombre = res_nombre.get("results", [])[0]["response"].get("result", {}).get("rows", [])
             if not filas_nombre:
@@ -1188,7 +1190,8 @@ async def gestionar_envio_saga(update: Update, context: ContextTypes.DEFAULT_TYP
             "FROM sagas s "
             "INNER JOIN saga_peliculas sp ON sp.saga_id = s.id "
             "INNER JOIN peliculas p ON p.id = sp.pelicula_id "
-            f"WHERE s.id = {saga_id} AND s.chat_id = '{chat_id}' AND p.chat_id = s.chat_id AND p.temporada = 'General'"
+            f"WHERE s.id = {saga_id} AND (s.chat_id = '{chat_id}' OR (CAST('{chat_id}' AS INTEGER) < 0 AND CAST(s.chat_id AS INTEGER) > 0)) "
+            "AND p.chat_id = s.chat_id AND p.temporada = 'General'"
         )
         resultado = await ejecutar_turso_sql([sql])
         filas = resultado.get("results", [])[0]["response"].get("result", {}).get("rows", [])
