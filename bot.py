@@ -2061,8 +2061,8 @@ async def notificar_solicitudes_resueltas(titulo_base: str, temporada_guardada: 
                 InlineKeyboardButton(etiqueta[:64], callback_data=f"seltemp_id_{registro_id}_{temporada_guardada}")
             ]])
             texto_notificacion = (
-                f"🎉 ¡Tu petición ha sido agregada al catálogo!\\n\\n"
-                f"📺 Contenido: <b>{escape(titulo_solicitado)}</b>\\n\\n"
+                f"🎉 ¡Tu petición ha sido agregada al catálogo!\n\n"
+                f"📺 Contenido: <b>{escape(titulo_solicitado)}</b>\n\n"
                 "Pulsa el botón para abrir directamente el contenido."
             )
             # Para solicitudes hechas en grupos, se intenta el DM sin perder
@@ -3524,7 +3524,8 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             else:
                 context.user_data["ia_peticion_pendiente"] = {
                     "titulo": titulo_pedido, "temporada": "General",
-                    "chat_id": update.effective_chat.id
+                    "chat_id": update.effective_chat.id,
+                    "origen_mensaje_id": update.message.message_id
                 }
                 confirmacion_id = secrets.token_hex(6)
                 titulo_sql = titulo_pedido.replace("'", "''")
@@ -3598,7 +3599,10 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if str(pendiente.get("chat_id")) == str(update.effective_chat.id):
             context.user_data.pop("ia_peticion_pendiente", None)
             try:
-                await registrar_peticion_desde_ia(update, context, pendiente, mensaje_origen=update.message)
+                await registrar_peticion_desde_ia(
+                    update, context, pendiente, mensaje_origen=update.message,
+                    origen_mensaje_id=pendiente.get("origen_mensaje_id")
+                )
             except Exception as error:
                 logger.error("Error registrando petición aceptada en texto: %s", error, exc_info=True)
                 await update.message.reply_text("❌ No pude registrar la petición. Inténtalo de nuevo o utiliza /pedir.")
