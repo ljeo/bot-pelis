@@ -3594,7 +3594,10 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 if not any(alias in clave_titulo for alias in aliases[numero_narnia.group(1)]):
                     continue
                 vistos_narnia.add(rid)
-                botones_narnia.append([InlineKeyboardButton(f"🎬 Ver: {titulo_para_boton_pelicula(titulo)}"[:64], callback_data=f"seltemp_id_{rid}_General")])
+                titulo_mostrar = titulo_para_boton_pelicula(titulo)
+                if numero_narnia.group(1) == "3" and "2010" not in titulo_mostrar:
+                    titulo_mostrar += " (2010)"
+                botones_narnia.append([InlineKeyboardButton(f"🎬 Ver: {titulo_mostrar}"[:64], callback_data=f"seltemp_id_{rid}_General")])
             if botones_narnia:
                 await update.message.reply_text("🎬 He encontrado la película de Narnia en el catálogo. Pulsa para verla:", reply_markup=InlineKeyboardMarkup(botones_narnia))
             else:
