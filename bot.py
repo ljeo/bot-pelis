@@ -3570,44 +3570,37 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         context.user_data.pop("ia_peticion_pendiente", None)
 
-    # Caso puntual: "Narnia 1" debe resolverse contra el catálogo, sin pedir
-    # a la IA que improvise una recomendación o una sinopsis bilingüe.
+    # Resolver Narnia 1, 2 o 3 contra los títulos reales del catálogo.
     consulta_narnia = normalizar_busqueda(pregunta)
-    if re.search(r"\bnarnia\b", consulta_narnia) and re.search(r"\b1\b", consulta_narnia) and re.search(
-        r"\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame)\b", consulta_narnia
-    ):
+    numero_narnia = re.search(r"\\bnarnia\\s*([123])\\b", consulta_narnia)
+    if numero_narnia and re.search(r"\\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame)\\b", consulta_narnia):
         try:
-            resultado_narnia = await ejecutar_turso_sql([
-                "SELECT id, temporada, titulo FROM peliculas ORDER BY id DESC"
-            ])
+            resultado_narnia = await ejecutar_turso_sql(["SELECT id, temporada, titulo FROM peliculas ORDER BY id DESC"])
             filas_narnia = resultado_narnia.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
             botones_narnia = []
             vistos_narnia = set()
+            aliases = {
+                "1": ("el leon la bruja y el ropero", "the lion the witch and the wardrobe"),
+                "2": ("el principe caspian", "prince caspian"),
+                "3": ("la travesia del viajero del alba", "the voyage of the dawn treader", "viajero del alba")
+            }
             for fila in filas_narnia:
                 rid = str(fila[0].get("value", "")) if len(fila) > 0 else ""
                 temp = str(fila[1].get("value", "General")) if len(fila) > 1 else "General"
                 titulo = str(fila[2].get("value", "")) if len(fila) > 2 else ""
-                if not rid or temp != "General":
-                    continue
                 clave_titulo = normalizar_busqueda(titulo)
-                if "narnia" not in clave_titulo or rid in vistos_narnia:
+                if not rid or temp != "General" or rid in vistos_narnia:
+                    continue
+                if not any(alias in clave_titulo for alias in aliases[numero_narnia.group(1)]):
                     continue
                 vistos_narnia.add(rid)
-                botones_narnia.append([InlineKeyboardButton(
-                    f"🎬 Ver: {titulo_para_boton_pelicula(titulo)}"[:64],
-                    callback_data=f"seltemp_id_{rid}_General"
-                )])
+                botones_narnia.append([InlineKeyboardButton(f"🎬 Ver: {titulo_para_boton_pelicula(titulo)}"[:64], callback_data=f"seltemp_id_{rid}_General")])
             if botones_narnia:
-                await update.message.reply_text(
-                    "🎬 He encontrado Narnia en el catálogo. Pulsa el botón para verla:",
-                    reply_markup=InlineKeyboardMarkup(botones_narnia)
-                )
+                await update.message.reply_text("🎬 He encontrado la película de Narnia en el catálogo. Pulsa para verla:", reply_markup=InlineKeyboardMarkup(botones_narnia))
             else:
-                await update.message.reply_text(
-                    "No encuentro Narnia 1 en el catálogo. Si quieres, puedes solicitarla."
-                )
+                await update.message.reply_text("No encuentro esa película de Narnia en el catálogo. Si quieres, puedes solicitarla.")
         except Exception as error_narnia:
-            logger.error("Error buscando Narnia 1 en el catálogo: %s", error_narnia, exc_info=True)
+            logger.error("Error buscando película de Narnia en el catálogo: %s", error_narnia, exc_info=True)
             await update.message.reply_text("⚠️ No pude consultar el catálogo ahora mismo. Inténtalo de nuevo.")
         return
 
@@ -3642,6 +3635,34 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     catalogo.append(f"- {titulo} ({temporada})")
         except Exception as error_catalogo:
             logger.warning("No se pudo cargar el catálogo para el asistente: %s", error_catalogo)
+
+        # Las peticiones simples se resuelven primero contra el catálogo para
+        # evitar respuestas largas o en otro idioma generadas por la IA.
+        consulta_directa = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(pregunta)).strip()
+        pide_directo = bool(re.search(r"\\b(?:quiero|quisiera|dame|ver|busco|ponme|muestrame|envia|mandame|pasame)\\b", consulta_directa))
+        ruido_directo = {"quiero", "quisiera", "dame", "ver", "busco", "buscar", "ponme", "muestrame", "mostrar", "envia", "mandame", "pasame", "pelicula", "peliculas", "serie", "series", "por", "favor", "la", "el", "los", "las", "de", "del", "una", "un"}
+        terminos_directos = [t for t in consulta_directa.split() if t not in ruido_directo]
+        if pide_directo and terminos_directos:
+            coincidencias_directas = []
+            for id_registro, temporada, titulo_registro in registros_catalogo:
+                nombre_directo = extraer_nombre_base_serie(titulo_registro) if temporada != "General" else re.sub(r"\\s*\\([^)]*\\)", " ", titulo_registro).strip()
+                nombre_norm = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(nombre_directo)).strip()
+                if nombre_norm and all(t in nombre_norm.split() for t in terminos_directos):
+                    coincidencias_directas.append((id_registro, temporada, titulo_registro))
+            if coincidencias_directas:
+                botones_directos = []
+                vistos_directos = set()
+                for rid, temporada, titulo_registro in coincidencias_directas:
+                    clave_directa = (rid, temporada)
+                    if clave_directa in vistos_directos:
+                        continue
+                    vistos_directos.add(clave_directa)
+                    if temporada == "General":
+                        botones_directos.append([InlineKeyboardButton(f"🎬 Ver: {titulo_para_boton_pelicula(titulo_registro)}"[:64], callback_data=f"seltemp_id_{rid}_General")])
+                    else:
+                        botones_directos.append([InlineKeyboardButton(f"📺 Ver serie: {extraer_nombre_base_serie(titulo_registro)}"[:64], callback_data=f"seriestemp_id_{rid}")])
+                await update.message.reply_text("🎬 He encontrado estas opciones en el catálogo:", reply_markup=InlineKeyboardMarkup(botones_directos))
+                return
 
         datos_tmdb = await buscar_datos_tmdb(pregunta)
         historial = context.user_data.get("ia_historial", [])
