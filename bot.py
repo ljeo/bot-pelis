@@ -3334,12 +3334,12 @@ async def buscar_datos_tmdb(pregunta: str) -> str:
     for patron in patrones:
         consulta = re.sub(patron, "", consulta, flags=re.IGNORECASE).strip()
     consulta = re.sub(
-        r"^(?:(?:la|el|una|un)\\s+)?(?:pelicula|serie|anime)\\s+",
+        r"^(?:(?:la|el|una|un)\s+)?(?:pelicula|serie|anime)\s+",
         "",
         consulta,
         flags=re.IGNORECASE
     ).strip()
-    consulta = re.sub(r"^[¿?¡!\\s]+|[¿?¡!\\s]+$", "", consulta).strip()
+    consulta = re.sub(r"^[¿?¡!\s]+|[¿?¡!\s]+$", "", consulta).strip()
     if len(consulta) < 2:
         return ""
 
@@ -3734,22 +3734,22 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             # Responder directamente desde TMDb solo cuando el título coincide exactamente.
             titulo_consultado = pregunta
             patrones_titulo = [
-                r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada)\\s+",
-                r"^(?:what year was|when was|release date of|release year of)\\s+",
-                r"\\s+(?:se estreno|salio|fue estrenada|fue lanzada)\\??$",
-                r"\\s+(?:en que ano|que ano|fecha de estreno|release date|release year)\\??$"
+                r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada)\s+",
+                r"^(?:what year was|when was|release date of|release year of)\s+",
+                r"\s+(?:se estreno|salio|fue estrenada|fue lanzada)\??$",
+                r"\s+(?:en que ano|que ano|fecha de estreno|release date|release year)\??$"
             ]
             for patron_titulo in patrones_titulo:
                 titulo_consultado = re.sub(patron_titulo, "", titulo_consultado, flags=re.IGNORECASE).strip()
             titulo_consultado = re.sub(
-                r"^(?:(?:la|el|una|un)\\s+)?(?:pelicula|serie|anime)\\s+",
+                r"^(?:(?:la|el|una|un)\s+)?(?:pelicula|serie|anime)\s+",
                 "",
                 titulo_consultado,
                 flags=re.IGNORECASE
-            ).strip(" ¿?¡!\\t\\n")
+            ).strip(" ¿?¡!\t\n")
             titulo_normalizado = re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(titulo_consultado)).strip()
             for linea_tmdb in datos_tmdb.splitlines():
-                campos_tmdb = dict(re.findall(r"(Título|Título original|Fecha de estreno|Año):\\s*([^;]+)", linea_tmdb))
+                campos_tmdb = dict(re.findall(r"(Título|Título original|Fecha de estreno|Año):\s*([^;]+)", linea_tmdb))
                 titulos_tmdb = [
                     re.sub(r"[^a-z0-9]+", " ", normalizar_busqueda(campos_tmdb.get(campo, ""))).strip()
                     for campo in ("Título", "Título original")
@@ -3758,10 +3758,10 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     fecha_tmdb = campos_tmdb.get("Fecha de estreno", "").strip()
                     anio_tmdb = campos_tmdb.get("Año", "").strip()
                     if fecha_tmdb and fecha_tmdb.lower() != "no disponible":
-                        fecha_formateada = re.sub(r"^(\\d{4})-(\\d{2})-(\\d{2}).*$", r"\\3/\\2/\\1", fecha_tmdb)
+                        fecha_formateada = re.sub(r"^(\d{4})-(\d{2})-(\d{2}).*$", r"\3/\2/\1", fecha_tmdb)
                         respuesta_fecha = (
                             f"El año de estreno de {campos_tmdb.get('Título', titulo_consultado)} es {anio_tmdb}."
-                            if re.search(r"\\b(?:ano|year)\\b", pregunta_norm_sinopsis) and anio_tmdb != "no disponible"
+                            if re.search(r"\b(?:ano|year)\b", pregunta_norm_sinopsis) and anio_tmdb != "no disponible"
                             else f"La fecha de estreno de {campos_tmdb.get('Título', titulo_consultado)} es {fecha_formateada}."
                         )
                         await update.message.reply_text(respuesta_fecha)
