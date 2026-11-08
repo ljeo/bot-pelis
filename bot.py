@@ -3324,7 +3324,7 @@ async def buscar_datos_tmdb(pregunta: str) -> str:
     if not consulta_fecha and not consulta_sinopsis:
         return ""
 
-    consulta = pregunta.strip(" ¿?¡!\t\n")
+    consulta = normalizar_busqueda(pregunta.strip(" ¿?¡!\t\n"))
     patrones = [
         r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada|de que trata|de que va|sinopsis de|argumento de|trama de|sobre que trata)\s+",
         r"^(?:what year was|when was|release date of|release year of|what is .* about|plot of|synopsis of)\s+",
@@ -3732,7 +3732,7 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         ))
         if es_pregunta_fecha and datos_tmdb:
             # Responder directamente desde TMDb solo cuando el título coincide exactamente.
-            titulo_consultado = pregunta.strip(" ¿?¡!\t\n")
+            titulo_consultado = normalizar_busqueda(pregunta.strip(" ¿?¡!\t\n"))
             patrones_titulo = [
                 r"^(?:en que ano se estreno|en que ano salio|cuando se estreno|cuando salio|cual es la fecha de estreno de|fecha de estreno de|ano de estreno de|cuando fue estrenada|cuando fue lanzada)\s+",
                 r"^(?:what year was|when was|release date of|release year of)\s+",
