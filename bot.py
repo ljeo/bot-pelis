@@ -3719,6 +3719,10 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             r"\b(?:de que trata|de que va|sinopsis|argumento|trama|sobre que trata|what is .* about|plot of|synopsis of)\b",
             pregunta_norm_sinopsis
         ))
+        es_pregunta_fecha = bool(re.search(
+            r"\b(?:ano|fecha|estreno|estren[oó]|lanzamiento|cuando salio|cuando se estreno|release date|release year|when did|premiere|fecha de lanzamiento)\b",
+            pregunta_norm_sinopsis
+        ))
         if es_pregunta_sinopsis:
             # Evita que el historial arrastre respuestas bilingües anteriores.
             contenidos = [{"role": "user", "parts": [{"text": pregunta}]}]
@@ -3848,6 +3852,25 @@ async def comando_ia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             r"request\s+analysis|analiza\s+la\s+solicitud|análisis\s+de\s+la\s+solicitud|"
             r"user|language|task|data\s+source)\s*:"
         )
+        if es_pregunta_fecha and re.search(
+            r"(?is)analyze\s+the\s+request|analysis(?:\s+of\s+the\s+request)?|request\s+analysis|"
+            r"analiza\s+la\s+solicitud|análisis\s+de\s+la\s+solicitud",
+            respuesta_texto
+        ):
+            # En preguntas de estreno, nunca enviar el análisis del modelo:
+            # recuperar la fecha del primer resultado que TMDb devolvió.
+            coincidencia_fecha = re.search(
+                r"(?m)^- Tipo: [^;]+; Título: ([^;]+);.*?; Fecha de estreno: ([^;]+)",
+                datos_tmdb or ""
+            )
+            if coincidencia_fecha and coincidencia_fecha.group(2).strip().lower() != "no disponible":
+                titulo_fecha = coincidencia_fecha.group(1).strip()
+                fecha_fecha = coincidencia_fecha.group(2).strip()
+                fecha_formateada = re.sub(r"^(\d{4})-(\d{2})-(\d{2}).*$", r"\3/\2/\1", fecha_fecha)
+                respuesta_texto = f"La fecha de estreno de {titulo_fecha} es {fecha_formateada}."
+                proveedor_usado = "TMDb (respaldo)"
+            else:
+                respuesta_texto = "No he podido confirmar la fecha de estreno de ese título con los datos disponibles."
         if es_pregunta_sinopsis and re.search(patron_analisis, respuesta_texto):
             # Si el modelo devuelve análisis interno, usar la sinopsis real de TMDb.
             coincidencia = re.search(r"; Sinopsis: ([^\n]+)", datos_tmdb or "")
