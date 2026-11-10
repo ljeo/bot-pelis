@@ -793,11 +793,27 @@ async def guardar_desde_canal(update: Update, context: ContextTypes.DEFAULT_TYPE
     file_id = message.video.file_id
     chat_id = str(message.chat_id)
 
-    # Recordar el canal que alimenta el catálogo compartido. La tabla config
-    # ya existe; no requiere migraciones ni altera los registros guardados.
+    # Mantener todos los canales que alimentan el catálogo compartido.
+    # Se conserva también la clave antigua para compatibilidad.
     try:
+        res_canales = await ejecutar_turso_sql([
+            "SELECT clave, valor FROM config WHERE clave IN ('catalogo_canal_id', 'catalogo_canales_ids')"
+        ])
+        filas_canales = res_canales.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+        ids_canales = set()
+        for fila_canal in filas_canales:
+            clave_canal = str(fila_canal[0].get("value", ""))
+            valor_canal = str(fila_canal[1].get("value", "") or "")
+            if clave_canal == "catalogo_canal_id" and valor_canal:
+                ids_canales.add(valor_canal)
+            elif clave_canal == "catalogo_canales_ids":
+                ids_canales.update(x.strip() for x in valor_canal.split(",") if x.strip())
+        ids_canales.add(chat_id)
+        canales_config_sql = ",".join(sorted(ids_canales)).replace("'", "''")
         chat_id_config = chat_id.replace("'", "''")
         await ejecutar_turso_sql([
+            "INSERT OR REPLACE INTO config (clave, valor) "
+            f"VALUES ('catalogo_canales_ids', '{canales_config_sql}')",
             "INSERT OR REPLACE INTO config (clave, valor) "
             f"VALUES ('catalogo_canal_id', '{chat_id_config}')"
         ])
@@ -1021,23 +1037,25 @@ async def mostrar_catalogo_peliculas(update: Update, context: ContextTypes.DEFAU
             pagina = 0
     ITEMS_POR_PAGINA = 8
     try:
-        # Las publicaciones automáticas se guardan con el ID del canal.
-        # Se combina ese catálogo compartido con las entradas locales del chat,
-        # sin mezclar las sagas creadas en otros grupos.
-        canal_id = ""
+        # Combinar los registros locales con todos los canales configurados.
+        ids_canales = set()
         try:
-            res_canal = await ejecutar_turso_sql([
-                "SELECT valor FROM config WHERE clave = 'catalogo_canal_id' LIMIT 1"
+            res_canales = await ejecutar_turso_sql([
+                "SELECT clave, valor FROM config WHERE clave IN ('catalogo_canal_id', 'catalogo_canales_ids')"
             ])
-            filas_canal = res_canal.get("results", [])[0]["response"].get("result", {}).get("rows", [])
-            if filas_canal and filas_canal[0][0].get("value"):
-                canal_id = str(filas_canal[0][0]["value"]).replace("'", "''")
+            filas_canales = res_canales.get("results", [])[0].get("response", {}).get("result", {}).get("rows", [])
+            for fila_canal in filas_canales:
+                clave_canal = str(fila_canal[0].get("value", ""))
+                valor_canal = str(fila_canal[1].get("value", "") or "")
+                if clave_canal == "catalogo_canal_id" and valor_canal:
+                    ids_canales.add(valor_canal)
+                elif clave_canal == "catalogo_canales_ids":
+                    ids_canales.update(x.strip() for x in valor_canal.split(",") if x.strip())
         except Exception as e_canal:
-            logger.info(f"No se pudo leer el canal del catálogo compartido: {e_canal}")
+            logger.info(f"No se pudieron leer los canales del catálogo compartido: {e_canal}")
 
         ids_catalogo = {chat_id}
-        if canal_id:
-            ids_catalogo.add(canal_id)
+        ids_catalogo.update(ids_canales)
         filtro_chats = ", ".join(f"'{id_chat}'" for id_chat in sorted(ids_catalogo))
         sql = (
             "SELECT id, titulo FROM peliculas "
